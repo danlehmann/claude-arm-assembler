@@ -74,12 +74,10 @@ struct AluOp {
 /// Bits [15:8]=01000110+op [7]=D [6:3]=Rm [2:0]=Rd_lo
 #[bitfield(u16)]
 struct HiRegOp {
-    #[bits(0..=2, rw)]
-    rd_lo: u3,
+    #[bits([0..=2, 7], rw)]
+    rd: u4,
     #[bits(3..=6, rw)]
     rm: u4,
-    #[bit(7, rw)]
-    rd_hi: bool,
     #[bits(8..=9, rw)]
     op: u2,
     // bits 10-15: 010001 (prefix 0x4400)
@@ -280,7 +278,7 @@ pub fn thumb_instruction_size(inst: &Instruction) -> u32 {
         Ldm | Ldmia | Ldmfd | Ldmdb | Stm | Stmia | Stmea | Stmdb | Stmfd => {
             match inst.operands.as_slice() {
                 // LDMIA SP!, {R0-R7, PC} → narrow POP
-                [Operand::Reg(13), Operand::RegList(mask)]
+                [Operand::Reg(SP), Operand::RegList(mask)]
                     if matches!(inst.mnemonic, Ldm | Ldmia | Ldmfd)
                         && inst.writeback
                         && (*mask & 0x7F00) == 0 =>
@@ -289,7 +287,7 @@ pub fn thumb_instruction_size(inst: &Instruction) -> u32 {
                 }
                 // Narrow LDMIA/STMIA only for low base reg with writeback
                 [Operand::Reg(rn), Operand::RegList(mask)]
-                    if *rn <= 7 && (*mask & 0xFF00) == 0 =>
+                    if rn.value() <= 7 && (*mask & 0xFF00) == 0 =>
                 {
                     match inst.mnemonic {
                         Ldmia | Ldm | Ldmfd | Stmia | Stm | Stmea => 2,
@@ -307,7 +305,7 @@ pub fn thumb_instruction_size(inst: &Instruction) -> u32 {
             match inst.operands.as_slice() {
                 // High register or large immediate -> wide
                 [Operand::Reg(rd), Operand::Imm(imm)]
-                    if *rd > 7 || *imm < 0 || *imm > 255 =>
+                    if rd.value() > 7 || *imm < 0 || *imm > 255 =>
                 {
                     4
                 }
@@ -315,28 +313,28 @@ pub fn thumb_instruction_size(inst: &Instruction) -> u32 {
                 [Operand::Reg(rd), Operand::Imm(_)]
                     if matches!(inst.mnemonic, Mov)
                         && !inst.set_flags && inst.condition.is_none()
-                        && *rd <= 7 =>
+                        && rd.value() <= 7 =>
                 {
                     4
                 }
                 [Operand::Reg(rd), Operand::Reg(rn), Operand::Imm(imm)]
-                    if *rd > 7 || *rn > 7 || *imm < 0 || *imm > 7 =>
+                    if rd.value() > 7 || rn.value() > 7 || *imm < 0 || *imm > 7 =>
                 {
                     if matches!(inst.mnemonic, Add | Sub) {
                         let v = *imm as u32;
-                        if *rd == 13 && *rn == 13 {
+                        if rd.value() == 13 && rn.value() == 13 {
                             // ADD/SUB SP, SP, #imm7*4 (Format 13: 0..508)
                             if v % 4 == 0 && v <= 508 { 2 } else { 4 }
-                        } else if *rn == 13 && *rd <= 7 && matches!(inst.mnemonic, Add) {
+                        } else if rn.value() == 13 && rd.value() <= 7 && matches!(inst.mnemonic, Add) {
                             // ADD Rd, SP, #imm8*4 (Format 12: 0..1020)
                             if v % 4 == 0 && v <= 1020 { 2 } else { 4 }
-                        } else if *rd <= 7 && *rn == *rd && *imm >= 0 && *imm <= 255 {
+                        } else if rd.value() <= 7 && rn == rd && *imm >= 0 && *imm <= 255 {
                             // Format 3: ADDS/SUBS Rd, #imm8 (Rd == Rn)
                             2
                         } else {
                             4
                         }
-                    } else if *rd <= 7 && *rn == *rd && *imm >= 0 && *imm <= 255
+                    } else if rd.value() <= 7 && rn == rd && *imm >= 0 && *imm <= 255
                         && matches!(inst.mnemonic, Cmp)
                     {
                         // Format 3: CMP Rd, #imm8
@@ -347,7 +345,7 @@ pub fn thumb_instruction_size(inst: &Instruction) -> u32 {
                 }
                 // 2-reg form: only MOV, ADD, CMP have hi-reg narrow (Format 5)
                 [Operand::Reg(rd), Operand::Reg(rm)]
-                    if (*rd > 7 || *rm > 7)
+                    if (rd.value() > 7 || rm.value() > 7)
                         && !matches!(inst.mnemonic, Mov | Add | Cmp) =>
                 {
                     4
@@ -355,12 +353,12 @@ pub fn thumb_instruction_size(inst: &Instruction) -> u32 {
                 // 3-reg form: only ADD/SUB have dedicated 3-reg narrow;
                 // ALU ops (AND, ORR, etc.) need Rd == Rn to collapse to 2-reg narrow
                 [Operand::Reg(rd), Operand::Reg(rn), Operand::Reg(rm)]
-                    if *rd > 7 || *rn > 7 || *rm > 7 =>
+                    if rd.value() > 7 || rn.value() > 7 || rm.value() > 7 =>
                 {
                     4
                 }
                 [Operand::Reg(rd), Operand::Reg(rn), Operand::Reg(_)]
-                    if *rd != *rn && !matches!(inst.mnemonic, Add | Sub) =>
+                    if rd != rn && !matches!(inst.mnemonic, Add | Sub) =>
                 {
                     4
                 }
@@ -373,11 +371,11 @@ pub fn thumb_instruction_size(inst: &Instruction) -> u32 {
         Ldr | Str | Ldrb | Strb | Ldrh | Strh => {
             match inst.operands.as_slice() {
                 [Operand::Reg(rt), Operand::Memory { base, offset: MemOffset::Imm(imm), .. }] => {
-                    if *rt > 7 || (*base > 7 && *base != 13) {
+                    if rt.value() > 7 || (base.value() > 7 && base.value() != 13) {
                         return 4;
                     }
                     match inst.mnemonic {
-                        Ldr | Str if *base == 13 => {
+                        Ldr | Str if base.value() == 13 => {
                             if *imm < 0 || *imm > 1020 || (*imm as u32) % 4 != 0 { 4 } else { 2 }
                         }
                         Ldr | Str => {
@@ -393,7 +391,7 @@ pub fn thumb_instruction_size(inst: &Instruction) -> u32 {
                     }
                 }
                 [Operand::Reg(rt), Operand::Memory { base, offset: MemOffset::Reg(rm, _), .. }] => {
-                    if *rt > 7 || *base > 7 || *rm > 7 { 4 } else { 2 }
+                    if rt.value() > 7 || base.value() > 7 || rm.value() > 7 { 4 } else { 2 }
                 }
                 [Operand::Reg(rt), Operand::Memory { offset: MemOffset::RegShift(..), .. }] => {
                     let _ = rt;
@@ -405,15 +403,15 @@ pub fn thumb_instruction_size(inst: &Instruction) -> u32 {
         Ldrsb | Ldrsh => 4, // No narrow encoding for signed loads with immediate
         Lsl | Lsr | Asr | Ror => {
             match inst.operands.as_slice() {
-                [Operand::Reg(rd), Operand::Reg(rm), ..] if *rd > 7 || *rm > 7 => 4,
+                [Operand::Reg(rd), Operand::Reg(rm), ..] if rd.value() > 7 || rm.value() > 7 => 4,
                 _ => 2,
             }
         }
         Mul => {
             match inst.operands.as_slice() {
                 [Operand::Reg(rd), Operand::Reg(_), Operand::Reg(rd2)]
-                    if *rd <= 7 && *rd2 <= 7 && *rd == *rd2 => 2,
-                [Operand::Reg(rd), Operand::Reg(rm)] if *rd <= 7 && *rm <= 7 => 2,
+                    if rd.value() <= 7 && rd2.value() <= 7 && rd == rd2 => 2,
+                [Operand::Reg(rd), Operand::Reg(rm)] if rd.value() <= 7 && rm.value() <= 7 => 2,
                 _ => 4,
             }
         }
@@ -426,13 +424,13 @@ pub fn thumb_instruction_size(inst: &Instruction) -> u32 {
         }
         Rev | Rev16 | Revsh | Sxth | Sxtb | Uxth | Uxtb => {
             match inst.operands.as_slice() {
-                [Operand::Reg(rd), Operand::Reg(rm)] if *rd > 7 || *rm > 7 => 4,
+                [Operand::Reg(rd), Operand::Reg(rm)] if rd.value() > 7 || rm.value() > 7 => 4,
                 _ => 2,
             }
         }
         Neg => {
             match inst.operands.as_slice() {
-                [Operand::Reg(rd), Operand::Reg(rm)] if *rd > 7 || *rm > 7 => 4,
+                [Operand::Reg(rd), Operand::Reg(rm)] if rd.value() > 7 || rm.value() > 7 => 4,
                 _ => 2,
             }
         }
@@ -665,15 +663,17 @@ fn emit16(hw: u16) -> Vec<u8> {
     hw.to_le_bytes().to_vec()
 }
 
-fn lo(r: u8) -> u3 {
-    u3::new(r & 7)
+/// Convert a low register (R0-R7) to u3 for narrow Thumb encodings.
+/// Callers must ensure r <= 7 via match guards; panics in debug if not.
+fn lo(r: u4) -> u3 {
+    u3::new(r.value())
 }
 
-fn require_lo(r: u8, line: usize, ctx: &str) -> Result<u3, AsmError> {
-    if r > 7 {
-        Err(AsmError::new(line, format!("{ctx}: register R{r} must be R0-R7")))
+fn require_lo(r: u4, line: usize, ctx: &str) -> Result<u3, AsmError> {
+    if r.value() > 7 {
+        Err(AsmError::new(line, format!("{ctx}: register R{} must be R0-R7", r.value())))
     } else {
-        Ok(u3::new(r))
+        Ok(u3::new(r.value()))
     }
 }
 
@@ -694,7 +694,7 @@ fn encode_mov(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
     match inst.operands.as_slice() {
         // MOVS Rd, #imm8 (Rd low) -- narrow only when S flag set or inside IT block
         [Operand::Reg(rd), Operand::Imm(imm)]
-            if *rd <= 7 && (inst.set_flags || inst.condition.is_some()) =>
+            if rd.value() <= 7 && (inst.set_flags || inst.condition.is_some()) =>
         {
             let hw = DataImm8::new_with_raw_value(0x2000)
                 .with_op(u2::new(0b00))
@@ -703,11 +703,10 @@ fn encode_mov(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
             Ok(emit16(hw.raw_value()))
         }
         // MOV Rd, Rm (any registers, format 5)
-        [Operand::Reg(rd), Operand::Reg(rm)] if !inst.set_flags || *rd > 7 || *rm > 7 => {
+        [Operand::Reg(rd), Operand::Reg(rm)] if !inst.set_flags || rd.value() > 7 || rm.value() > 7 => {
             let hw = HiRegOp::new_with_raw_value(0x4600)
-                .with_rd_hi(*rd >= 8)
-                .with_rm(u4::new(*rm))
-                .with_rd_lo(lo(*rd));
+                .with_rd(*rd)
+                .with_rm(*rm);
             Ok(emit16(hw.raw_value()))
         }
         // MOVS Rd, Rm (low registers only, encoded as LSL Rd, Rm, #0)
@@ -732,7 +731,7 @@ fn encode_add(
     let line = inst.line;
     match inst.operands.as_slice() {
         // ADD Rd, SP, #imm8 (Format 12)
-        [Operand::Reg(rd), Operand::Reg(13), Operand::Imm(imm)] if *rd <= 7 => {
+        [Operand::Reg(rd), Operand::Reg(SP), Operand::Imm(imm)] if rd.value() <= 7 => {
             let scaled = *imm as u32;
             if scaled % 4 != 0 || scaled > 1020 {
                 return Err(AsmError::new(line, "ADD Rd, SP, #imm: immediate must be 0..1020, word-aligned"));
@@ -743,8 +742,8 @@ fn encode_add(
             Ok(emit16(hw.raw_value()))
         }
         // ADD SP, SP, #imm7 (Format 13)
-        [Operand::Reg(13), Operand::Reg(13), Operand::Imm(imm)]
-        | [Operand::Reg(13), Operand::Imm(imm)] => {
+        [Operand::Reg(SP), Operand::Reg(SP), Operand::Imm(imm)]
+        | [Operand::Reg(SP), Operand::Imm(imm)] => {
             let scaled = *imm as u32;
             if scaled % 4 != 0 || scaled > 508 {
                 return Err(AsmError::new(line, "ADD SP, #imm: immediate must be 0..508, word-aligned"));
@@ -756,7 +755,7 @@ fn encode_add(
         }
         // ADDS Rd, Rn, #imm8 (Format 3) when Rd == Rn -- preferred by GNU as
         [Operand::Reg(rd), Operand::Reg(rn), Operand::Imm(imm)]
-            if *rd <= 7 && *rd == *rn && *imm >= 0 && *imm <= 255 =>
+            if rd.value() <= 7 && rd == rn && *imm >= 0 && *imm <= 255 =>
         {
             let hw = DataImm8::new_with_raw_value(0x3000)
                 .with_rd(require_lo(*rd, line, "ADDS")?)
@@ -765,7 +764,7 @@ fn encode_add(
         }
         // ADDS Rd, Rn, #imm3 (Format 2)
         [Operand::Reg(rd), Operand::Reg(rn), Operand::Imm(imm)]
-            if *rd <= 7 && *rn <= 7 && *imm >= 0 && *imm <= 7 =>
+            if rd.value() <= 7 && rn.value() <= 7 && *imm >= 0 && *imm <= 7 =>
         {
             let hw = AddSubRegImm3::new_with_raw_value(0x1C00)
                 .with_rd(require_lo(*rd, line, "ADD")?)
@@ -777,7 +776,7 @@ fn encode_add(
         }
         // ADDS Rd, Rn, Rm (Format 2)
         [Operand::Reg(rd), Operand::Reg(rn), Operand::Reg(rm)]
-            if *rd <= 7 && *rn <= 7 && *rm <= 7 =>
+            if rd.value() <= 7 && rn.value() <= 7 && rm.value() <= 7 =>
         {
             let hw = AddSubRegImm3::new_with_raw_value(0x1800)
                 .with_rd(require_lo(*rd, line, "ADD")?)
@@ -788,23 +787,22 @@ fn encode_add(
             Ok(emit16(hw.raw_value()))
         }
         // ADDS Rd, #imm8 (Format 3)
-        [Operand::Reg(rd), Operand::Imm(imm)] if *rd <= 7 => {
+        [Operand::Reg(rd), Operand::Imm(imm)] if rd.value() <= 7 => {
             let hw = DataImm8::new_with_raw_value(0x3000)
                 .with_rd(require_lo(*rd, line, "ADDS")?)
                 .with_imm8(imm_u8(*imm, line)?);
             Ok(emit16(hw.raw_value()))
         }
         // ADD Rd, Rm (high registers, Format 5)
-        [Operand::Reg(rd), Operand::Reg(rm)] if *rd > 7 || *rm > 7 => {
+        [Operand::Reg(rd), Operand::Reg(rm)] if rd.value() > 7 || rm.value() > 7 => {
             let hw = HiRegOp::new_with_raw_value(0x4400)
                 .with_op(u2::new(0b00))
-                .with_rd_hi(*rd >= 8)
-                .with_rm(u4::new(*rm))
-                .with_rd_lo(lo(*rd));
+                .with_rd(*rd)
+                .with_rm(*rm);
             Ok(emit16(hw.raw_value()))
         }
         // ADD Rd, PC, #imm (label, Format 12 = ADR)
-        [Operand::Reg(rd), Operand::Label(name)] if *rd <= 7 => {
+        [Operand::Reg(rd), Operand::Label(name)] if rd.value() <= 7 => {
             let target = resolve_label(name, symbols, equs, line)?;
             let pc = (offset + 4) & !3; // Thumb PC is aligned
             let disp = target.wrapping_sub(pc);
@@ -824,8 +822,8 @@ fn encode_sub(inst: &Instruction, _offset: u32) -> Result<Vec<u8>, AsmError> {
     let line = inst.line;
     match inst.operands.as_slice() {
         // SUB SP, SP, #imm7 (Format 13)
-        [Operand::Reg(13), Operand::Reg(13), Operand::Imm(imm)]
-        | [Operand::Reg(13), Operand::Imm(imm)] => {
+        [Operand::Reg(SP), Operand::Reg(SP), Operand::Imm(imm)]
+        | [Operand::Reg(SP), Operand::Imm(imm)] => {
             let scaled = *imm as u32;
             if scaled % 4 != 0 || scaled > 508 {
                 return Err(AsmError::new(line, "SUB SP, #imm: immediate must be 0..508, word-aligned"));
@@ -836,7 +834,7 @@ fn encode_sub(inst: &Instruction, _offset: u32) -> Result<Vec<u8>, AsmError> {
         }
         // SUBS Rd, Rn, #imm8 (Format 3) when Rd == Rn -- preferred by GNU as
         [Operand::Reg(rd), Operand::Reg(rn), Operand::Imm(imm)]
-            if *rd <= 7 && *rd == *rn && *imm >= 0 && *imm <= 255 =>
+            if rd.value() <= 7 && rd == rn && *imm >= 0 && *imm <= 255 =>
         {
             let hw = DataImm8::new_with_raw_value(0x3800)
                 .with_rd(require_lo(*rd, line, "SUBS")?)
@@ -845,7 +843,7 @@ fn encode_sub(inst: &Instruction, _offset: u32) -> Result<Vec<u8>, AsmError> {
         }
         // SUBS Rd, Rn, #imm3
         [Operand::Reg(rd), Operand::Reg(rn), Operand::Imm(imm)]
-            if *rd <= 7 && *rn <= 7 && *imm >= 0 && *imm <= 7 =>
+            if rd.value() <= 7 && rn.value() <= 7 && *imm >= 0 && *imm <= 7 =>
         {
             let hw = AddSubRegImm3::new_with_raw_value(0x1E00)
                 .with_rd(require_lo(*rd, line, "SUB")?)
@@ -857,7 +855,7 @@ fn encode_sub(inst: &Instruction, _offset: u32) -> Result<Vec<u8>, AsmError> {
         }
         // SUBS Rd, Rn, Rm
         [Operand::Reg(rd), Operand::Reg(rn), Operand::Reg(rm)]
-            if *rd <= 7 && *rn <= 7 && *rm <= 7 =>
+            if rd.value() <= 7 && rn.value() <= 7 && rm.value() <= 7 =>
         {
             let hw = AddSubRegImm3::new_with_raw_value(0x1A00)
                 .with_rd(require_lo(*rd, line, "SUB")?)
@@ -868,7 +866,7 @@ fn encode_sub(inst: &Instruction, _offset: u32) -> Result<Vec<u8>, AsmError> {
             Ok(emit16(hw.raw_value()))
         }
         // SUBS Rd, #imm8
-        [Operand::Reg(rd), Operand::Imm(imm)] if *rd <= 7 => {
+        [Operand::Reg(rd), Operand::Imm(imm)] if rd.value() <= 7 => {
             let hw = DataImm8::new_with_raw_value(0x3800)
                 .with_rd(require_lo(*rd, line, "SUBS")?)
                 .with_imm8(imm_u8(*imm, line)?);
@@ -882,14 +880,14 @@ fn encode_cmp(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
     let line = inst.line;
     match inst.operands.as_slice() {
         // CMP Rn, #imm8 (Format 3)
-        [Operand::Reg(rn), Operand::Imm(imm)] if *rn <= 7 => {
+        [Operand::Reg(rn), Operand::Imm(imm)] if rn.value() <= 7 => {
             let hw = DataImm8::new_with_raw_value(0x2800)
                 .with_rd(require_lo(*rn, line, "CMP")?)
                 .with_imm8(imm_u8(*imm, line)?);
             Ok(emit16(hw.raw_value()))
         }
         // CMP Rn, Rm (low regs, Format 4)
-        [Operand::Reg(rn), Operand::Reg(rm)] if *rn <= 7 && *rm <= 7 => {
+        [Operand::Reg(rn), Operand::Reg(rm)] if rn.value() <= 7 && rm.value() <= 7 => {
             let hw = AluOp::new_with_raw_value(0x4000)
                 .with_op(u4::new(0b1010))
                 .with_rm(require_lo(*rm, line, "CMP")?)
@@ -899,9 +897,8 @@ fn encode_cmp(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
         // CMP Rn, Rm (high regs, Format 5)
         [Operand::Reg(rn), Operand::Reg(rm)] => {
             let hw = HiRegOp::new_with_raw_value(0x4500)
-                .with_rd_hi(*rn >= 8)
-                .with_rm(u4::new(*rm))
-                .with_rd_lo(lo(*rn));
+                .with_rd(*rn)
+                .with_rm(*rm);
             Ok(emit16(hw.raw_value()))
         }
         _ => Err(AsmError::new(line, "invalid operands for CMP in Thumb mode")),
@@ -913,10 +910,10 @@ fn encode_alu(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
     let (rd, rm) = match inst.operands.as_slice() {
         [Operand::Reg(rd), Operand::Reg(rm)] => (*rd, *rm),
         // 3-operand form where Rd == Rn: collapse to 2-reg (AND Rd, Rd, Rm -> ANDS Rd, Rm)
-        [Operand::Reg(rd), Operand::Reg(rn), Operand::Reg(rm)] if *rd == *rn => (*rd, *rm),
+        [Operand::Reg(rd), Operand::Reg(rn), Operand::Reg(rm)] if rd == rn => (*rd, *rm),
         // MUL Rd, Rn, Rd - three-operand form (Rd must match first and third)
         [Operand::Reg(rd), Operand::Reg(rm), Operand::Reg(rd2)]
-            if inst.mnemonic == Mnemonic::Mul && *rd == *rd2 =>
+            if inst.mnemonic == Mnemonic::Mul && rd == rd2 =>
         {
             (*rd, *rm)
         }
@@ -1007,7 +1004,7 @@ fn encode_ldr(
     match inst.operands.as_slice() {
         // LDR Rt, [Rn, #imm] (word, Format 9)
         [Operand::Reg(rt), Operand::Memory { base, offset: MemOffset::Imm(imm), .. }]
-            if *rt <= 7 && *base <= 7 && *base != 13 =>
+            if rt.value() <= 7 && base.value() <= 7 && base.value() != 13 =>
         {
             let val = *imm as u32;
             if val % 4 != 0 || val > 124 {
@@ -1020,8 +1017,8 @@ fn encode_ldr(
             Ok(emit16(hw.raw_value()))
         }
         // LDR Rt, [SP, #imm] (Format 11)
-        [Operand::Reg(rt), Operand::Memory { base: 13, offset: MemOffset::Imm(imm), .. }]
-            if *rt <= 7 =>
+        [Operand::Reg(rt), Operand::Memory { base: SP, offset: MemOffset::Imm(imm), .. }]
+            if rt.value() <= 7 =>
         {
             let val = *imm as u32;
             if val % 4 != 0 || val > 1020 {
@@ -1034,7 +1031,7 @@ fn encode_ldr(
         }
         // LDR Rt, [Rn, Rm] (register offset, Format 7)
         [Operand::Reg(rt), Operand::Memory { base, offset: MemOffset::Reg(rm, _), .. }]
-            if *rt <= 7 && *base <= 7 && *rm <= 7 =>
+            if rt.value() <= 7 && base.value() <= 7 && rm.value() <= 7 =>
         {
             let hw = LdrStrRegOff::new_with_raw_value(0x5800)
                 .with_rt(lo(*rt))
@@ -1043,14 +1040,14 @@ fn encode_ldr(
             Ok(emit16(hw.raw_value()))
         }
         // LDR Rt, label (PC-relative, Format 6)
-        [Operand::Reg(rt), Operand::Label(name)] if *rt <= 7 => {
+        [Operand::Reg(rt), Operand::Label(name)] if rt.value() <= 7 => {
             let target = resolve_label(name, symbols, equs, line)?;
             let pc = (offset + 4) & !3;
             let disp = target.wrapping_sub(pc);
             if disp % 4 != 0 || disp > 1020 {
                 return Err(AsmError::new(line, "LDR PC-relative: offset out of range (0..1020, word-aligned)"));
             }
-            let hw: u16 = 0x4800 | (((*rt as u16) & 7) << 8) | ((disp / 4) as u16 & 0xFF);
+            let hw: u16 = 0x4800 | (((rt.value() as u16) & 7) << 8) | ((disp / 4) as u16 & 0xFF);
             Ok(emit16(hw))
         }
         _ => Err(AsmError::new(line, "invalid operands for LDR in Thumb mode")),
@@ -1062,7 +1059,7 @@ fn encode_str(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
     match inst.operands.as_slice() {
         // STR Rt, [Rn, #imm] (word, Format 9)
         [Operand::Reg(rt), Operand::Memory { base, offset: MemOffset::Imm(imm), .. }]
-            if *rt <= 7 && *base <= 7 && *base != 13 =>
+            if rt.value() <= 7 && base.value() <= 7 && base.value() != 13 =>
         {
             let val = *imm as u32;
             if val % 4 != 0 || val > 124 {
@@ -1075,8 +1072,8 @@ fn encode_str(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
             Ok(emit16(hw.raw_value()))
         }
         // STR Rt, [SP, #imm] (Format 11)
-        [Operand::Reg(rt), Operand::Memory { base: 13, offset: MemOffset::Imm(imm), .. }]
-            if *rt <= 7 =>
+        [Operand::Reg(rt), Operand::Memory { base: SP, offset: MemOffset::Imm(imm), .. }]
+            if rt.value() <= 7 =>
         {
             let val = *imm as u32;
             if val % 4 != 0 || val > 1020 {
@@ -1089,7 +1086,7 @@ fn encode_str(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
         }
         // STR Rt, [Rn, Rm] (register offset, Format 7)
         [Operand::Reg(rt), Operand::Memory { base, offset: MemOffset::Reg(rm, _), .. }]
-            if *rt <= 7 && *base <= 7 && *rm <= 7 =>
+            if rt.value() <= 7 && base.value() <= 7 && rm.value() <= 7 =>
         {
             let hw = LdrStrRegOff::new_with_raw_value(0x5000)
                 .with_rt(lo(*rt))
@@ -1105,7 +1102,7 @@ fn encode_ldrb(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
     let line = inst.line;
     match inst.operands.as_slice() {
         [Operand::Reg(rt), Operand::Memory { base, offset: MemOffset::Imm(imm), .. }]
-            if *rt <= 7 && *base <= 7 =>
+            if rt.value() <= 7 && base.value() <= 7 =>
         {
             let val = *imm as u32;
             if val > 31 {
@@ -1118,7 +1115,7 @@ fn encode_ldrb(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
             Ok(emit16(hw.raw_value()))
         }
         [Operand::Reg(rt), Operand::Memory { base, offset: MemOffset::Reg(rm, _), .. }]
-            if *rt <= 7 && *base <= 7 && *rm <= 7 =>
+            if rt.value() <= 7 && base.value() <= 7 && rm.value() <= 7 =>
         {
             let hw = LdrStrRegOff::new_with_raw_value(0x5C00)
                 .with_rt(lo(*rt))
@@ -1134,7 +1131,7 @@ fn encode_strb(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
     let line = inst.line;
     match inst.operands.as_slice() {
         [Operand::Reg(rt), Operand::Memory { base, offset: MemOffset::Imm(imm), .. }]
-            if *rt <= 7 && *base <= 7 =>
+            if rt.value() <= 7 && base.value() <= 7 =>
         {
             let val = *imm as u32;
             if val > 31 {
@@ -1147,7 +1144,7 @@ fn encode_strb(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
             Ok(emit16(hw.raw_value()))
         }
         [Operand::Reg(rt), Operand::Memory { base, offset: MemOffset::Reg(rm, _), .. }]
-            if *rt <= 7 && *base <= 7 && *rm <= 7 =>
+            if rt.value() <= 7 && base.value() <= 7 && rm.value() <= 7 =>
         {
             let hw = LdrStrRegOff::new_with_raw_value(0x5400)
                 .with_rt(lo(*rt))
@@ -1163,7 +1160,7 @@ fn encode_ldrh(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
     let line = inst.line;
     match inst.operands.as_slice() {
         [Operand::Reg(rt), Operand::Memory { base, offset: MemOffset::Imm(imm), .. }]
-            if *rt <= 7 && *base <= 7 =>
+            if rt.value() <= 7 && base.value() <= 7 =>
         {
             let val = *imm as u32;
             if val % 2 != 0 || val > 62 {
@@ -1176,7 +1173,7 @@ fn encode_ldrh(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
             Ok(emit16(hw.raw_value()))
         }
         [Operand::Reg(rt), Operand::Memory { base, offset: MemOffset::Reg(rm, _), .. }]
-            if *rt <= 7 && *base <= 7 && *rm <= 7 =>
+            if rt.value() <= 7 && base.value() <= 7 && rm.value() <= 7 =>
         {
             let hw = LdrStrRegOff::new_with_raw_value(0x5A00)
                 .with_rt(lo(*rt))
@@ -1192,7 +1189,7 @@ fn encode_strh(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
     let line = inst.line;
     match inst.operands.as_slice() {
         [Operand::Reg(rt), Operand::Memory { base, offset: MemOffset::Imm(imm), .. }]
-            if *rt <= 7 && *base <= 7 =>
+            if rt.value() <= 7 && base.value() <= 7 =>
         {
             let val = *imm as u32;
             if val % 2 != 0 || val > 62 {
@@ -1205,7 +1202,7 @@ fn encode_strh(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
             Ok(emit16(hw.raw_value()))
         }
         [Operand::Reg(rt), Operand::Memory { base, offset: MemOffset::Reg(rm, _), .. }]
-            if *rt <= 7 && *base <= 7 && *rm <= 7 =>
+            if rt.value() <= 7 && base.value() <= 7 && rm.value() <= 7 =>
         {
             let hw = LdrStrRegOff::new_with_raw_value(0x5200)
                 .with_rt(lo(*rt))
@@ -1346,7 +1343,7 @@ fn encode_bx(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
     match inst.operands.as_slice() {
         [Operand::Reg(rm)] => {
             let hw = HiRegOp::new_with_raw_value(0x4700)
-                .with_rm(u4::new(*rm));
+                .with_rm(*rm);
             Ok(emit16(hw.raw_value()))
         }
         _ => Err(AsmError::new(line, "BX requires one register operand")),
@@ -1358,7 +1355,7 @@ fn encode_blx(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
     match inst.operands.as_slice() {
         [Operand::Reg(rm)] => {
             let hw = HiRegOp::new_with_raw_value(0x4780)
-                .with_rm(u4::new(*rm));
+                .with_rm(*rm);
             Ok(emit16(hw.raw_value()))
         }
         _ => Err(AsmError::new(line, "BLX requires one register operand")),
@@ -1384,7 +1381,7 @@ fn encode_adr(
 ) -> Result<Vec<u8>, AsmError> {
     let line = inst.line;
     match inst.operands.as_slice() {
-        [Operand::Reg(rd), Operand::Label(name)] if *rd <= 7 => {
+        [Operand::Reg(rd), Operand::Label(name)] if rd.value() <= 7 => {
             let target = resolve_label(name, symbols, equs, line)?;
             let pc = (offset + 4) & !3;
             let disp = target.wrapping_sub(pc);
@@ -1446,7 +1443,7 @@ fn encode_misc_thumb(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
         [Operand::Reg(rd), Operand::Reg(rm)] => (*rd, *rm),
         _ => return Err(AsmError::new(line, "expected two registers")),
     };
-    if rd > 7 || rm > 7 {
+    if rd.value() > 7 || rm.value() > 7 {
         return Err(AsmError::new(line, "narrow encoding requires R0-R7"));
     }
     let opcode: u16 = match inst.mnemonic {
@@ -1459,7 +1456,7 @@ fn encode_misc_thumb(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
         Mnemonic::Uxtb => 0xB2C0,
         _ => return Err(AsmError::new(line, "unsupported misc instruction")),
     };
-    let hw = opcode | ((rm as u16) << 3) | (rd as u16);
+    let hw = opcode | ((rm.value() as u16) << 3) | (rd.value() as u16);
     Ok(emit16(hw))
 }
 
@@ -1478,7 +1475,7 @@ fn encode_cbz_cbnz(
         [Operand::Reg(rn), Operand::Label(name)] => (*rn, name),
         _ => return Err(AsmError::new(line, "CBZ/CBNZ requires register and label")),
     };
-    if rn > 7 {
+    if rn.value() > 7 {
         return Err(AsmError::new(line, "CBZ/CBNZ: register must be R0-R7"));
     }
     let target = resolve_label(label, symbols, equs, line)?;
@@ -1490,7 +1487,7 @@ fn encode_cbz_cbnz(
     let imm5 = (disp >> 1) & 0x1F;
     let i = (disp >> 6) & 1;
     let op = if inst.mnemonic == Mnemonic::Cbnz { 1u16 } else { 0 };
-    let hw: u16 = 0xB100 | (op << 11) | ((i as u16) << 9) | ((imm5 as u16) << 3) | (rn as u16);
+    let hw: u16 = 0xB100 | (op << 11) | ((i as u16) << 9) | ((imm5 as u16) << 3) | (rn.value() as u16);
     Ok(emit16(hw))
 }
 
@@ -1510,16 +1507,16 @@ fn encode_ldm_narrow(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
     let line = inst.line;
     match inst.operands.as_slice() {
         // LDMIA SP!, {R0-R7, PC} → narrow POP
-        [Operand::Reg(13), Operand::RegList(mask)]
+        [Operand::Reg(SP), Operand::RegList(mask)]
             if inst.writeback && (*mask & 0x7F00) == 0 =>
         {
             let pc_bit = if (*mask & 0x8000) != 0 { 0x0100u16 } else { 0 };
             let hw: u16 = 0xBC00 | pc_bit | (*mask as u16 & 0xFF);
             Ok(emit16(hw))
         }
-        [Operand::Reg(rn), Operand::RegList(mask)] if *rn <= 7 && (*mask & 0xFF00) == 0 => {
+        [Operand::Reg(rn), Operand::RegList(mask)] if rn.value() <= 7 && (*mask & 0xFF00) == 0 => {
             // LDMIA Rn!, {reglist} (narrow: writeback is implicit, Rn not in list means writeback)
-            let hw: u16 = 0xC800 | ((*rn as u16) << 8) | (*mask as u16 & 0xFF);
+            let hw: u16 = 0xC800 | ((rn.value() as u16) << 8) | (*mask as u16 & 0xFF);
             Ok(emit16(hw))
         }
         _ => Err(AsmError::new(line, "LDM narrow: need low base reg and R0-R7")),
@@ -1529,8 +1526,8 @@ fn encode_ldm_narrow(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
 fn encode_stm_narrow(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
     let line = inst.line;
     match inst.operands.as_slice() {
-        [Operand::Reg(rn), Operand::RegList(mask)] if *rn <= 7 && (*mask & 0xFF00) == 0 => {
-            let hw: u16 = 0xC000 | ((*rn as u16) << 8) | (*mask as u16 & 0xFF);
+        [Operand::Reg(rn), Operand::RegList(mask)] if rn.value() <= 7 && (*mask & 0xFF00) == 0 => {
+            let hw: u16 = 0xC000 | ((rn.value() as u16) << 8) | (*mask as u16 & 0xFF);
             Ok(emit16(hw))
         }
         _ => Err(AsmError::new(line, "STM narrow: need low base reg and R0-R7")),
@@ -1562,30 +1559,29 @@ fn encode_t2_data_proc(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
         [Operand::Reg(rd), Operand::Imm(imm)] if is_move => {
             let imm12 = thumb_expand_imm_encoding(*imm as u32)
                 .ok_or_else(|| AsmError::new(line, format!("immediate {imm} not encodable as Thumb modified immediate")))?;
-            let rn = 0xF; // Rn = 1111 for MOV/MVN
-            Ok(t2_dp_mod_imm(opcode, s, rn, *rd, imm12))
+            Ok(t2_dp_mod_imm(opcode, s, PC, *rd, imm12))
         }
         // MOV/MVN Rd, Rm [, shift]
         [Operand::Reg(rd), Operand::Reg(rm)] if is_move => {
-            Ok(t2_dp_shift_reg(opcode, s, 0xF, *rd, *rm, 0, 0))
+            Ok(t2_dp_shift_reg(opcode, s, PC, *rd, *rm, 0, 0))
         }
         [Operand::Reg(rd), Operand::Shifted(rm, st, amount)] if is_move => {
             let (stype, simm) = shift_encoding(*st, amount, line)?;
-            Ok(t2_dp_shift_reg(opcode, s, 0xF, *rd, *rm, stype, simm))
+            Ok(t2_dp_shift_reg(opcode, s, PC, *rd, *rm, stype, simm))
         }
         // CMP/CMN/TST/TEQ Rn, #imm
         [Operand::Reg(rn), Operand::Imm(imm)] if is_test => {
             let imm12 = thumb_expand_imm_encoding(*imm as u32)
                 .ok_or_else(|| AsmError::new(line, format!("immediate {imm} not encodable")))?;
-            Ok(t2_dp_mod_imm(opcode, true, *rn, 0xF, imm12))
+            Ok(t2_dp_mod_imm(opcode, true, *rn, PC, imm12))
         }
         // CMP/CMN/TST/TEQ Rn, Rm [, shift]
         [Operand::Reg(rn), Operand::Reg(rm)] if is_test => {
-            Ok(t2_dp_shift_reg(opcode, true, *rn, 0xF, *rm, 0, 0))
+            Ok(t2_dp_shift_reg(opcode, true, *rn, PC, *rm, 0, 0))
         }
         [Operand::Reg(rn), Operand::Shifted(rm, st, amount)] if is_test => {
             let (stype, simm) = shift_encoding(*st, amount, line)?;
-            Ok(t2_dp_shift_reg(opcode, true, *rn, 0xF, *rm, stype, simm))
+            Ok(t2_dp_shift_reg(opcode, true, *rn, PC, *rm, stype, simm))
         }
         // Normal: OP Rd, Rn, #imm
         [Operand::Reg(rd), Operand::Reg(rn), Operand::Imm(imm)] => {
@@ -1625,27 +1621,27 @@ fn shift_encoding(st: ShiftType, amount: &Operand, line: usize) -> Result<(u8, u
 }
 
 /// Encode Thumb-2 DP modified immediate: 11110 i 0 op S Rn | 0 imm3 Rd imm8
-fn t2_dp_mod_imm(opcode: u8, s: bool, rn: u8, rd: u8, imm12: u16) -> Vec<u8> {
+fn t2_dp_mod_imm(opcode: u8, s: bool, rn: u4, rd: u4, imm12: u16) -> Vec<u8> {
     let i = ((imm12 >> 11) & 1) as u16;
     let imm3 = ((imm12 >> 8) & 7) as u16;
     let imm8 = (imm12 & 0xFF) as u16;
     let hw1: u16 =
-        0xF000 | (i << 10) | ((opcode as u16) << 5) | ((s as u16) << 4) | (rn as u16 & 0xF);
-    let hw2: u16 = (imm3 << 12) | ((rd as u16 & 0xF) << 8) | imm8;
+        0xF000 | (i << 10) | ((opcode as u16) << 5) | ((s as u16) << 4) | (rn.value() as u16);
+    let hw2: u16 = (imm3 << 12) | ((rd.value() as u16) << 8) | imm8;
     emit32_thumb(hw1, hw2)
 }
 
 /// Encode Thumb-2 DP shifted register: 1110101 op S Rn | 0 imm3 Rd imm2 type Rm
-fn t2_dp_shift_reg(opcode: u8, s: bool, rn: u8, rd: u8, rm: u8, stype: u8, simm: u8) -> Vec<u8> {
+fn t2_dp_shift_reg(opcode: u8, s: bool, rn: u4, rd: u4, rm: u4, stype: u8, simm: u8) -> Vec<u8> {
     let imm3 = ((simm >> 2) & 7) as u16;
     let imm2 = (simm & 3) as u16;
     let hw1: u16 =
-        0xEA00 | ((opcode as u16) << 5) | ((s as u16) << 4) | (rn as u16 & 0xF);
+        0xEA00 | ((opcode as u16) << 5) | ((s as u16) << 4) | (rn.value() as u16);
     let hw2: u16 = (imm3 << 12)
-        | ((rd as u16 & 0xF) << 8)
+        | ((rd.value() as u16) << 8)
         | (imm2 << 6)
         | ((stype as u16 & 3) << 4)
-        | (rm as u16 & 0xF);
+        | (rm.value() as u16);
     emit32_thumb(hw1, hw2)
 }
 
@@ -1668,7 +1664,7 @@ fn encode_t2_movw_movt(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
     let imm8 = imm & 0xFF;
     let base = if inst.mnemonic == Mnemonic::Movw { 0xF240u16 } else { 0xF2C0u16 };
     let hw1: u16 = base | ((i as u16) << 10) | imm4 as u16;
-    let hw2: u16 = ((imm3 as u16) << 12) | ((rd as u16 & 0xF) << 8) | imm8 as u16;
+    let hw2: u16 = ((imm3 as u16) << 12) | ((rd.value() as u16 & 0xF) << 8) | imm8 as u16;
     Ok(emit32_thumb(hw1, hw2))
 }
 
@@ -1689,7 +1685,7 @@ fn encode_t2_shift(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
                 [Operand::Reg(rd), Operand::Reg(rm)] => (*rd, *rm),
                 _ => return Err(AsmError::new(line, "RRX: expected Rd, Rm")),
             };
-            return Ok(t2_dp_shift_reg(0b0010, inst.set_flags, 0xF, rd, rm, 0b11, 0));
+            return Ok(t2_dp_shift_reg(0b0010, inst.set_flags, PC, rd, rm, 0b11, 0));
         }
         _ => unreachable!(),
     };
@@ -1697,14 +1693,14 @@ fn encode_t2_shift(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
     match inst.operands.as_slice() {
         // LSL.W Rd, Rm, #imm → MOV.W Rd, Rm, LSL #imm
         [Operand::Reg(rd), Operand::Reg(rm), Operand::Imm(imm)] => {
-            Ok(t2_dp_shift_reg(0b0010, inst.set_flags, 0xF, *rd, *rm, stype, *imm as u8))
+            Ok(t2_dp_shift_reg(0b0010, inst.set_flags, PC, *rd, *rm, stype, *imm as u8))
         }
         // LSL.W Rd, Rn, Rs (register shift)
         // Encoding: 11111010 0 type S Rn | 1111 Rd 0000 Rm
         [Operand::Reg(rd), Operand::Reg(rn), Operand::Reg(rs)] => {
             let s = inst.set_flags;
-            let hw1: u16 = 0xFA00 | ((stype as u16) << 5) | ((s as u16) << 4) | (*rn as u16 & 0xF);
-            let hw2: u16 = 0xF000 | ((*rd as u16 & 0xF) << 8) | (*rs as u16 & 0xF);
+            let hw1: u16 = 0xFA00 | ((stype as u16) << 5) | ((s as u16) << 4) | (rn.value() as u16 & 0xF);
+            let hw2: u16 = 0xF000 | ((rd.value() as u16 & 0xF) << 8) | (rs.value() as u16 & 0xF);
             Ok(emit32_thumb(hw1, hw2))
         }
         _ => Err(AsmError::new(line, "invalid operands for wide shift")),
@@ -1720,26 +1716,26 @@ fn encode_t2_mul(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
     match inst.operands.as_slice() {
         // MUL Rd, Rn, Rm: 11111011 0000 Rn | 1111 Rd 0000 Rm
         [Operand::Reg(rd), Operand::Reg(rn), Operand::Reg(rm)] if inst.mnemonic == Mnemonic::Mul => {
-            let hw1: u16 = 0xFB00 | (*rn as u16 & 0xF);
-            let hw2: u16 = 0xF000 | ((*rd as u16 & 0xF) << 8) | (*rm as u16 & 0xF);
+            let hw1: u16 = 0xFB00 | (rn.value() as u16 & 0xF);
+            let hw2: u16 = 0xF000 | ((rd.value() as u16 & 0xF) << 8) | (rm.value() as u16 & 0xF);
             Ok(emit32_thumb(hw1, hw2))
         }
         // MLA Rd, Rn, Rm, Ra: 11111011 0000 Rn | Ra Rd 0000 Rm
         [Operand::Reg(rd), Operand::Reg(rn), Operand::Reg(rm), Operand::Reg(ra)]
             if inst.mnemonic == Mnemonic::Mla =>
         {
-            let hw1: u16 = 0xFB00 | (*rn as u16 & 0xF);
+            let hw1: u16 = 0xFB00 | (rn.value() as u16 & 0xF);
             let hw2: u16 =
-                ((*ra as u16 & 0xF) << 12) | ((*rd as u16 & 0xF) << 8) | (*rm as u16 & 0xF);
+                ((ra.value() as u16 & 0xF) << 12) | ((rd.value() as u16 & 0xF) << 8) | (rm.value() as u16 & 0xF);
             Ok(emit32_thumb(hw1, hw2))
         }
         // MLS Rd, Rn, Rm, Ra: 11111011 0000 Rn | Ra Rd 0001 Rm
         [Operand::Reg(rd), Operand::Reg(rn), Operand::Reg(rm), Operand::Reg(ra)]
             if inst.mnemonic == Mnemonic::Mls =>
         {
-            let hw1: u16 = 0xFB00 | (*rn as u16 & 0xF);
+            let hw1: u16 = 0xFB00 | (rn.value() as u16 & 0xF);
             let hw2: u16 =
-                ((*ra as u16 & 0xF) << 12) | ((*rd as u16 & 0xF) << 8) | 0x0010 | (*rm as u16 & 0xF);
+                ((ra.value() as u16 & 0xF) << 12) | ((rd.value() as u16 & 0xF) << 8) | 0x0010 | (rm.value() as u16 & 0xF);
             Ok(emit32_thumb(hw1, hw2))
         }
         _ => Err(AsmError::new(line, format!("invalid operands for {:?}", inst.mnemonic))),
@@ -1762,8 +1758,8 @@ fn encode_t2_long_mul(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
         Mnemonic::Umlal => 0xFBE0u16,
         _ => unreachable!(),
     };
-    let hw1: u16 = op | (rn as u16 & 0xF);
-    let hw2: u16 = ((rdlo as u16 & 0xF) << 12) | ((rdhi as u16 & 0xF) << 8) | (rm as u16 & 0xF);
+    let hw1: u16 = op | (rn.value() as u16 & 0xF);
+    let hw2: u16 = ((rdlo.value() as u16 & 0xF) << 12) | ((rdhi.value() as u16 & 0xF) << 8) | (rm.value() as u16 & 0xF);
     Ok(emit32_thumb(hw1, hw2))
 }
 
@@ -1774,8 +1770,8 @@ fn encode_t2_div(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
         _ => return Err(AsmError::new(line, "SDIV/UDIV: need Rd, Rn, Rm")),
     };
     let op = if inst.mnemonic == Mnemonic::Sdiv { 0xFB90u16 } else { 0xFBB0u16 };
-    let hw1: u16 = op | (rn as u16 & 0xF);
-    let hw2: u16 = 0xF0F0 | ((rd as u16 & 0xF) << 8) | (rm as u16 & 0xF);
+    let hw1: u16 = op | (rn.value() as u16 & 0xF);
+    let hw2: u16 = 0xF0F0 | ((rd.value() as u16 & 0xF) << 8) | (rm.value() as u16 & 0xF);
     Ok(emit32_thumb(hw1, hw2))
 }
 
@@ -1818,8 +1814,8 @@ fn encode_t2_ldr_str(
 
             if *pre_index && !*writeback && imm_val >= 0 && imm_val <= 4095 {
                 // T3 encoding: positive offset, imm12
-                let hw1: u16 = t3_base | (rn as u16 & 0xF);
-                let hw2: u16 = ((*rt as u16 & 0xF) << 12) | (imm_val as u16 & 0xFFF);
+                let hw1: u16 = t3_base | (rn.value() as u16 & 0xF);
+                let hw2: u16 = ((rt.value() as u16 & 0xF) << 12) | (imm_val as u16 & 0xFFF);
                 Ok(emit32_thumb(hw1, hw2))
             } else {
                 // T4 encoding: imm8 with P/U/W bits
@@ -1834,8 +1830,8 @@ fn encode_t2_ldr_str(
                 let p = *pre_index as u16;
                 let u = add as u16;
                 let w = *writeback as u16;
-                let hw1: u16 = t4_base | (rn as u16 & 0xF);
-                let hw2: u16 = ((*rt as u16 & 0xF) << 12)
+                let hw1: u16 = t4_base | (rn.value() as u16 & 0xF);
+                let hw2: u16 = ((rt.value() as u16 & 0xF) << 12)
                     | 0x0800
                     | (p << 10)
                     | (u << 9)
@@ -1846,13 +1842,13 @@ fn encode_t2_ldr_str(
         }
         // LDR.W Rt, [Rn, Rm, LSL #shift]
         [Operand::Reg(rt), Operand::Memory { base, offset: MemOffset::Reg(rm, _), .. }] => {
-            let hw1: u16 = t4_base | (*base as u16 & 0xF);
-            let hw2: u16 = ((*rt as u16 & 0xF) << 12) | (*rm as u16 & 0xF);
+            let hw1: u16 = t4_base | (base.value() as u16 & 0xF);
+            let hw2: u16 = ((rt.value() as u16 & 0xF) << 12) | (rm.value() as u16 & 0xF);
             Ok(emit32_thumb(hw1, hw2))
         }
         [Operand::Reg(rt), Operand::Memory { base, offset: MemOffset::RegShift(rm, ShiftType::Lsl, shift, _), .. }] => {
-            let hw1: u16 = t4_base | (*base as u16 & 0xF);
-            let hw2: u16 = ((*rt as u16 & 0xF) << 12) | ((*shift as u16 & 3) << 4) | (*rm as u16 & 0xF);
+            let hw1: u16 = t4_base | (base.value() as u16 & 0xF);
+            let hw2: u16 = ((rt.value() as u16 & 0xF) << 12) | ((*shift as u16 & 3) << 4) | (rm.value() as u16 & 0xF);
             Ok(emit32_thumb(hw1, hw2))
         }
         // LDR Rt, label (PC-relative, wide)
@@ -1866,7 +1862,7 @@ fn encode_t2_ldr_str(
             }
             // LDR (literal) T2: 11111000 U1011111 Rt imm12
             let hw1: u16 = 0xF85F | (u << 7);
-            let hw2: u16 = ((*rt as u16 & 0xF) << 12) | (abs_disp as u16 & 0xFFF);
+            let hw2: u16 = ((rt.value() as u16 & 0xF) << 12) | (abs_disp as u16 & 0xFFF);
             Ok(emit32_thumb(hw1, hw2))
         }
         _ => Err(AsmError::new(line, format!("invalid operands for {:?}.W", m))),
@@ -1899,8 +1895,8 @@ fn encode_t2_ldrd_strd(
             let w = *writeback as u16;
             let l = load as u16;
             // 1110100 PU1WL Rn
-            let hw1: u16 = 0xE800 | (p << 8) | (u << 7) | (1 << 6) | (w << 5) | (l << 4) | (*base as u16 & 0xF);
-            let hw2: u16 = ((*rt as u16 & 0xF) << 12) | ((*rt2 as u16 & 0xF) << 8) | imm8;
+            let hw1: u16 = 0xE800 | (p << 8) | (u << 7) | (1 << 6) | (w << 5) | (l << 4) | (base.value() as u16 & 0xF);
+            let hw2: u16 = ((rt.value() as u16 & 0xF) << 12) | ((rt2.value() as u16 & 0xF) << 8) | imm8;
             Ok(emit32_thumb(hw1, hw2))
         }
         // LDRD Rt, Rt2, label (PC-relative)
@@ -1915,7 +1911,7 @@ fn encode_t2_ldrd_strd(
             let imm8 = (abs_disp / 4) as u16;
             // LDRD (literal): 1110100 PU1W1 1111
             let hw1: u16 = 0xE95F | (u << 7);
-            let hw2: u16 = ((*rt as u16 & 0xF) << 12) | ((*rt2 as u16 & 0xF) << 8) | imm8;
+            let hw2: u16 = ((rt.value() as u16 & 0xF) << 12) | ((rt2.value() as u16 & 0xF) << 8) | imm8;
             Ok(emit32_thumb(hw1, hw2))
         }
         _ => Err(AsmError::new(line, "invalid operands for LDRD/STRD")),
@@ -1935,7 +1931,7 @@ fn encode_t2_ldm(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
     };
     let w = inst.writeback as u16;
     let base = if db { 0xE910u16 } else { 0xE890u16 };
-    let hw1: u16 = base | (w << 5) | (rn as u16 & 0xF);
+    let hw1: u16 = base | (w << 5) | (rn.value() as u16 & 0xF);
     let hw2: u16 = mask;
     Ok(emit32_thumb(hw1, hw2))
 }
@@ -1949,7 +1945,7 @@ fn encode_t2_stm(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
     };
     let w = inst.writeback as u16;
     let base = if db { 0xE900u16 } else { 0xE880u16 };
-    let hw1: u16 = base | (w << 5) | (rn as u16 & 0xF);
+    let hw1: u16 = base | (w << 5) | (rn.value() as u16 & 0xF);
     let hw2: u16 = mask;
     Ok(emit32_thumb(hw1, hw2))
 }
@@ -2049,8 +2045,8 @@ fn encode_t2_clz_rbit(inst: &Instruction, op1: u8, op2: u8) -> Result<Vec<u8>, A
         _ => return Err(AsmError::new(line, "CLZ/RBIT: need Rd, Rm")),
     };
     // 11111010 1 op1 Rm | 1111 Rd 1 op2 Rm
-    let hw1: u16 = 0xFA80 | ((op1 as u16 & 0xF) << 4) | (rm as u16 & 0xF);
-    let hw2: u16 = 0xF080 | ((rd as u16 & 0xF) << 8) | ((op2 as u16 & 0xF) << 4) | (rm as u16 & 0xF);
+    let hw1: u16 = 0xFA80 | ((op1 as u16 & 0xF) << 4) | (rm.value() as u16 & 0xF);
+    let hw2: u16 = 0xF080 | ((rd.value() as u16 & 0xF) << 8) | ((op2 as u16 & 0xF) << 4) | (rm.value() as u16 & 0xF);
     Ok(emit32_thumb(hw1, hw2))
 }
 
@@ -2066,8 +2062,8 @@ fn encode_t2_bfi(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
     let msb = lsb + width - 1;
     let imm3 = (lsb >> 2) & 7;
     let imm2 = lsb & 3;
-    let hw1: u16 = 0xF360 | (rn as u16 & 0xF);
-    let hw2: u16 = ((imm3 as u16) << 12) | ((rd as u16 & 0xF) << 8) | ((imm2 as u16) << 6) | (msb as u16 & 0x1F);
+    let hw1: u16 = 0xF360 | (rn.value() as u16 & 0xF);
+    let hw2: u16 = ((imm3 as u16) << 12) | ((rd.value() as u16 & 0xF) << 8) | ((imm2 as u16) << 6) | (msb as u16 & 0x1F);
     Ok(emit32_thumb(hw1, hw2))
 }
 
@@ -2082,7 +2078,7 @@ fn encode_t2_bfc(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
     let imm3 = (lsb >> 2) & 7;
     let imm2 = lsb & 3;
     let hw1: u16 = 0xF36F; // Rn = 1111 for BFC
-    let hw2: u16 = ((imm3 as u16) << 12) | ((rd as u16 & 0xF) << 8) | ((imm2 as u16) << 6) | (msb as u16 & 0x1F);
+    let hw2: u16 = ((imm3 as u16) << 12) | ((rd.value() as u16 & 0xF) << 8) | ((imm2 as u16) << 6) | (msb as u16 & 0x1F);
     Ok(emit32_thumb(hw1, hw2))
 }
 
@@ -2099,8 +2095,8 @@ fn encode_t2_bfx(inst: &Instruction, signed: bool) -> Result<Vec<u8>, AsmError> 
     let imm3 = (lsb >> 2) & 7;
     let imm2 = lsb & 3;
     let op = if signed { 0xF340u16 } else { 0xF3C0u16 };
-    let hw1: u16 = op | (rn as u16 & 0xF);
-    let hw2: u16 = ((imm3 as u16) << 12) | ((rd as u16 & 0xF) << 8) | ((imm2 as u16) << 6) | (widthm1 as u16 & 0x1F);
+    let hw1: u16 = op | (rn.value() as u16 & 0xF);
+    let hw2: u16 = ((imm3 as u16) << 12) | ((rd.value() as u16 & 0xF) << 8) | ((imm2 as u16) << 6) | (widthm1 as u16 & 0x1F);
     Ok(emit32_thumb(hw1, hw2))
 }
 
@@ -2117,8 +2113,8 @@ fn encode_t2_ldrex(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
     if imm < 0 || imm % 4 != 0 || imm > 1020 {
         return Err(AsmError::new(line, "LDREX: offset must be 0..1020, word-aligned"));
     }
-    let hw1: u16 = 0xE850 | (rn as u16 & 0xF);
-    let hw2: u16 = ((rt as u16 & 0xF) << 12) | 0x0F00 | ((imm as u16 / 4) & 0xFF);
+    let hw1: u16 = 0xE850 | (rn.value() as u16 & 0xF);
+    let hw2: u16 = ((rt.value() as u16 & 0xF) << 12) | 0x0F00 | ((imm as u16 / 4) & 0xFF);
     Ok(emit32_thumb(hw1, hw2))
 }
 
@@ -2133,8 +2129,8 @@ fn encode_t2_strex(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
     if imm < 0 || imm % 4 != 0 || imm > 1020 {
         return Err(AsmError::new(line, "STREX: offset must be 0..1020, word-aligned"));
     }
-    let hw1: u16 = 0xE840 | (rn as u16 & 0xF);
-    let hw2: u16 = ((rt as u16 & 0xF) << 12) | ((rd as u16 & 0xF) << 8) | ((imm as u16 / 4) & 0xFF);
+    let hw1: u16 = 0xE840 | (rn.value() as u16 & 0xF);
+    let hw2: u16 = ((rt.value() as u16 & 0xF) << 12) | ((rd.value() as u16 & 0xF) << 8) | ((imm as u16 / 4) & 0xFF);
     Ok(emit32_thumb(hw1, hw2))
 }
 
@@ -2148,8 +2144,8 @@ fn encode_t2_ldrex_bh(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
     // LDREXB: hw2 = Rt:1111:0100:1111 = (Rt<<12)|0xF4F
     // LDREXH: hw2 = Rt:1111:0101:1111 = (Rt<<12)|0xF5F
     let suffix = if inst.mnemonic == Mnemonic::Ldrexb { 0x0F4F_u16 } else { 0x0F5F };
-    let hw1: u16 = 0xE8D0 | (rn as u16 & 0xF);
-    let hw2: u16 = ((rt as u16 & 0xF) << 12) | suffix;
+    let hw1: u16 = 0xE8D0 | (rn.value() as u16 & 0xF);
+    let hw2: u16 = ((rt.value() as u16 & 0xF) << 12) | suffix;
     Ok(emit32_thumb(hw1, hw2))
 }
 
@@ -2163,8 +2159,8 @@ fn encode_t2_strex_bh(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
     // STREXB: hw2 = Rt:1111:0100:Rd = (Rt<<12)|0xF40|Rd
     // STREXH: hw2 = Rt:1111:0101:Rd = (Rt<<12)|0xF50|Rd
     let suffix = if inst.mnemonic == Mnemonic::Strexb { 0x0F40_u16 } else { 0x0F50 };
-    let hw1: u16 = 0xE8C0 | (rn as u16 & 0xF);
-    let hw2: u16 = ((rt as u16 & 0xF) << 12) | suffix | (rd as u16 & 0xF);
+    let hw1: u16 = 0xE8C0 | (rn.value() as u16 & 0xF);
+    let hw2: u16 = ((rt.value() as u16 & 0xF) << 12) | suffix | (rd.value() as u16 & 0xF);
     Ok(emit32_thumb(hw1, hw2))
 }
 
@@ -2180,7 +2176,7 @@ fn encode_t2_mrs(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
         _ => return Err(AsmError::new(line, "MRS: need Rd, sysreg")),
     };
     let hw1: u16 = 0xF3EF;
-    let hw2: u16 = 0x8000 | ((rd as u16 & 0xF) << 8) | (sysm & 0xFF);
+    let hw2: u16 = 0x8000 | ((rd.value() as u16 & 0xF) << 8) | (sysm & 0xFF);
     Ok(emit32_thumb(hw1, hw2))
 }
 
@@ -2191,7 +2187,7 @@ fn encode_t2_msr(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
         [Operand::Imm(sysm), Operand::Reg(rn)] => (*sysm as u16, *rn),
         _ => return Err(AsmError::new(line, "MSR: need sysreg, Rn")),
     };
-    let hw1: u16 = 0xF380 | (rn as u16 & 0xF);
+    let hw1: u16 = 0xF380 | (rn.value() as u16 & 0xF);
     let hw2: u16 = 0x8800 | (sysm & 0xFF);
     Ok(emit32_thumb(hw1, hw2))
 }
@@ -2208,8 +2204,8 @@ fn encode_t2_tb(inst: &Instruction, half: bool) -> Result<Vec<u8>, AsmError> {
         _ => return Err(AsmError::new(line, "TBB/TBH: need [Rn, Rm]")),
     };
     let h = half as u16;
-    let hw1: u16 = 0xE8D0 | (rn as u16 & 0xF);
-    let hw2: u16 = 0xF000 | (h << 4) | (rm as u16 & 0xF);
+    let hw1: u16 = 0xE8D0 | (rn.value() as u16 & 0xF);
+    let hw2: u16 = 0xF000 | (h << 4) | (rm.value() as u16 & 0xF);
     Ok(emit32_thumb(hw1, hw2))
 }
 
@@ -2225,8 +2221,8 @@ fn encode_t2_ssat(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
     let imm3 = ((shift_amt >> 2) & 7) as u16;
     let imm2 = (shift_amt & 3) as u16;
     let sat_imm = (sat - 1) as u16;
-    let hw1: u16 = 0xF300 | (sh << 5) | (rn as u16 & 0xF);
-    let hw2: u16 = (imm3 << 12) | ((rd as u16 & 0xF) << 8) | (imm2 << 6) | (sat_imm & 0x1F);
+    let hw1: u16 = 0xF300 | (sh << 5) | (rn.value() as u16 & 0xF);
+    let hw2: u16 = (imm3 << 12) | ((rd.value() as u16 & 0xF) << 8) | (imm2 << 6) | (sat_imm & 0x1F);
     Ok(emit32_thumb(hw1, hw2))
 }
 
@@ -2238,12 +2234,12 @@ fn encode_t2_usat(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
     let imm3 = ((shift_amt >> 2) & 7) as u16;
     let imm2 = (shift_amt & 3) as u16;
     let sat_imm = sat as u16;
-    let hw1: u16 = 0xF380 | (sh << 5) | (rn as u16 & 0xF);
-    let hw2: u16 = (imm3 << 12) | ((rd as u16 & 0xF) << 8) | (imm2 << 6) | (sat_imm & 0x1F);
+    let hw1: u16 = 0xF380 | (sh << 5) | (rn.value() as u16 & 0xF);
+    let hw2: u16 = (imm3 << 12) | ((rd.value() as u16 & 0xF) << 8) | (imm2 << 6) | (sat_imm & 0x1F);
     Ok(emit32_thumb(hw1, hw2))
 }
 
-fn parse_sat_operands(inst: &Instruction) -> Result<(u8, u8, u8, u8, u8), AsmError> {
+fn parse_sat_operands(inst: &Instruction) -> Result<(u4, u8, u4, u8, u8), AsmError> {
     let line = inst.line;
     match inst.operands.as_slice() {
         // SSAT/USAT Rd, #sat, Rn
@@ -2284,12 +2280,12 @@ fn encode_t2_extend(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
         Mnemonic::Uxtb => (0xFA5F, 0xF080),
         Mnemonic::Sxtb16 => (0xFA2F, 0xF080),
         Mnemonic::Uxtb16 => (0xFA3F, 0xF080),
-        Mnemonic::Rev => (0xFA90 | (rm as u16 & 0xF), 0xF080),
-        Mnemonic::Rev16 => (0xFA90 | (rm as u16 & 0xF), 0xF090),
-        Mnemonic::Revsh => (0xFA90 | (rm as u16 & 0xF), 0xF0B0),
+        Mnemonic::Rev => (0xFA90 | (rm.value() as u16 & 0xF), 0xF080),
+        Mnemonic::Rev16 => (0xFA90 | (rm.value() as u16 & 0xF), 0xF090),
+        Mnemonic::Revsh => (0xFA90 | (rm.value() as u16 & 0xF), 0xF0B0),
         _ => unreachable!(),
     };
-    let hw2: u16 = hw2_base | ((rd as u16 & 0xF) << 8) | (rm as u16 & 0xF);
+    let hw2: u16 = hw2_base | ((rd.value() as u16 & 0xF) << 8) | (rm.value() as u16 & 0xF);
     Ok(emit32_thumb(hw1, hw2))
 }
 
@@ -2320,8 +2316,8 @@ fn encode_t2_extend_add(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
         Mnemonic::Uxtab16 => 0xFA30,
         _ => unreachable!(),
     };
-    let hw1: u16 = op | (rn as u16 & 0xF);
-    let hw2: u16 = 0xF080 | ((rd as u16 & 0xF) << 8) | ((rot as u16 & 3) << 4) | (rm as u16 & 0xF);
+    let hw1: u16 = op | (rn.value() as u16 & 0xF);
+    let hw2: u16 = 0xF080 | ((rd.value() as u16 & 0xF) << 8) | ((rot as u16 & 3) << 4) | (rm.value() as u16 & 0xF);
     Ok(emit32_thumb(hw1, hw2))
 }
 
@@ -2335,14 +2331,14 @@ fn encode_t2_dsp_mul(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
     match inst.operands.as_slice() {
         [Operand::Reg(rd), Operand::Reg(rn), Operand::Reg(rm)] => {
             let (hw1_base, hw2_op) = dsp_mul_opcode_3(inst.mnemonic, line)?;
-            let hw1: u16 = hw1_base | (*rn as u16 & 0xF);
-            let hw2: u16 = 0xF000 | ((*rd as u16 & 0xF) << 8) | hw2_op | (*rm as u16 & 0xF);
+            let hw1: u16 = hw1_base | (rn.value() as u16 & 0xF);
+            let hw2: u16 = 0xF000 | ((rd.value() as u16 & 0xF) << 8) | hw2_op | (rm.value() as u16 & 0xF);
             Ok(emit32_thumb(hw1, hw2))
         }
         [Operand::Reg(rd), Operand::Reg(rn), Operand::Reg(rm), Operand::Reg(ra)] => {
             let (hw1_base, hw2_op) = dsp_mul_opcode_4(inst.mnemonic, line)?;
-            let hw1: u16 = hw1_base | (*rn as u16 & 0xF);
-            let hw2: u16 = ((*ra as u16 & 0xF) << 12) | ((*rd as u16 & 0xF) << 8) | hw2_op | (*rm as u16 & 0xF);
+            let hw1: u16 = hw1_base | (rn.value() as u16 & 0xF);
+            let hw2: u16 = ((ra.value() as u16 & 0xF) << 12) | ((rd.value() as u16 & 0xF) << 8) | hw2_op | (rm.value() as u16 & 0xF);
             Ok(emit32_thumb(hw1, hw2))
         }
         _ => Err(AsmError::new(line, "DSP multiply: invalid operands")),
@@ -2395,8 +2391,8 @@ fn encode_t2_dsp_long_mul(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
         Mnemonic::Smlsld => (0xFBD0, 0x00C0),
         _ => return Err(AsmError::new(line, "unexpected DSP long mul")),
     };
-    let hw1: u16 = hw1_base | (rn as u16 & 0xF);
-    let hw2: u16 = ((rdlo as u16 & 0xF) << 12) | ((rdhi as u16 & 0xF) << 8) | hw2_op | (rm as u16 & 0xF);
+    let hw1: u16 = hw1_base | (rn.value() as u16 & 0xF);
+    let hw2: u16 = ((rdlo.value() as u16 & 0xF) << 12) | ((rdhi.value() as u16 & 0xF) << 8) | hw2_op | (rm.value() as u16 & 0xF);
     Ok(emit32_thumb(hw1, hw2))
 }
 
@@ -2411,8 +2407,8 @@ fn encode_t2_parallel(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
         _ => return Err(AsmError::new(line, "parallel: need Rd, Rn, Rm")),
     };
     let (hw1_base, hw2_op) = parallel_opcode(inst.mnemonic, line)?;
-    let hw1: u16 = hw1_base | (rn as u16 & 0xF);
-    let hw2: u16 = 0xF000 | ((rd as u16 & 0xF) << 8) | hw2_op | (rm as u16 & 0xF);
+    let hw1: u16 = hw1_base | (rn.value() as u16 & 0xF);
+    let hw2: u16 = 0xF000 | ((rd.value() as u16 & 0xF) << 8) | hw2_op | (rm.value() as u16 & 0xF);
     Ok(emit32_thumb(hw1, hw2))
 }
 
@@ -2481,8 +2477,8 @@ fn encode_t2_sat_arith(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
         Mnemonic::Qdsub => (0xFA80, 0xF0B0),
         _ => unreachable!(),
     };
-    let hw1: u16 = hw1_base | (rn as u16 & 0xF);
-    let hw2: u16 = hw2_op | ((rd as u16 & 0xF) << 8) | (rm as u16 & 0xF);
+    let hw1: u16 = hw1_base | (rn.value() as u16 & 0xF);
+    let hw2: u16 = hw2_op | ((rd.value() as u16 & 0xF) << 8) | (rm.value() as u16 & 0xF);
     Ok(emit32_thumb(hw1, hw2))
 }
 
@@ -2504,8 +2500,8 @@ fn encode_t2_pkhbt(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
     let stype = if tb { 0b10u16 } else { 0b00u16 }; // ASR for PKHTB, LSL for PKHBT
     let imm3 = ((shift_amt >> 2) & 7) as u16;
     let imm2 = (shift_amt & 3) as u16;
-    let hw1: u16 = 0xEAC0 | (rn as u16 & 0xF);
-    let hw2: u16 = (imm3 << 12) | ((rd as u16 & 0xF) << 8) | (imm2 << 6) | (stype << 4) | (rm as u16 & 0xF);
+    let hw1: u16 = 0xEAC0 | (rn.value() as u16 & 0xF);
+    let hw2: u16 = (imm3 << 12) | ((rd.value() as u16 & 0xF) << 8) | (imm2 << 6) | (stype << 4) | (rm.value() as u16 & 0xF);
     Ok(emit32_thumb(hw1, hw2))
 }
 
@@ -2515,8 +2511,8 @@ fn encode_t2_sel(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
         [Operand::Reg(rd), Operand::Reg(rn), Operand::Reg(rm)] => (*rd, *rn, *rm),
         _ => return Err(AsmError::new(line, "SEL: need Rd, Rn, Rm")),
     };
-    let hw1: u16 = 0xFAA0 | (rn as u16 & 0xF);
-    let hw2: u16 = 0xF080 | ((rd as u16 & 0xF) << 8) | (rm as u16 & 0xF);
+    let hw1: u16 = 0xFAA0 | (rn.value() as u16 & 0xF);
+    let hw2: u16 = 0xF080 | ((rd.value() as u16 & 0xF) << 8) | (rm.value() as u16 & 0xF);
     Ok(emit32_thumb(hw1, hw2))
 }
 
@@ -2577,8 +2573,8 @@ fn encode_t2_ldr_str_unpriv(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
         Mnemonic::Ldrsht => 0xF930,
         _ => unreachable!(),
     };
-    let hw1: u16 = hw1_base | (rn as u16 & 0xF);
-    let hw2: u16 = ((rt as u16 & 0xF) << 12) | 0x0E00 | (imm as u16 & 0xFF);
+    let hw1: u16 = hw1_base | (rn.value() as u16 & 0xF);
+    let hw2: u16 = ((rt.value() as u16 & 0xF) << 12) | 0x0E00 | (imm as u16 & 0xFF);
     Ok(emit32_thumb(hw1, hw2))
 }
 
@@ -2590,11 +2586,11 @@ fn encode_t2_preload(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
     };
     let hw1_base: u16 = if inst.mnemonic == Mnemonic::Pld { 0xF890 } else { 0xF990 };
     if imm >= 0 && imm <= 4095 {
-        let hw1: u16 = hw1_base | (rn as u16 & 0xF);
+        let hw1: u16 = hw1_base | (rn.value() as u16 & 0xF);
         let hw2: u16 = 0xF000 | (imm as u16 & 0xFFF);
         Ok(emit32_thumb(hw1, hw2))
     } else if imm >= -255 && imm < 0 {
-        let hw1: u16 = (hw1_base & 0xFF7F) | (rn as u16 & 0xF); // clear U bit for negative
+        let hw1: u16 = (hw1_base & 0xFF7F) | (rn.value() as u16 & 0xF); // clear U bit for negative
         let hw2: u16 = 0xFC00 | ((-imm) as u16 & 0xFF);
         Ok(emit32_thumb(hw1, hw2))
     } else {

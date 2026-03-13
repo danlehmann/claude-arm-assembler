@@ -1,4 +1,10 @@
+use arbitrary_int::u4;
 use bitbybit::bitenum;
+
+/// Well-known register constants for pattern matching.
+pub const SP: u4 = u4::new(13);
+pub const LR: u4 = u4::new(14);
+pub const PC: u4 = u4::new(15);
 
 /// Instruction set to encode for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -522,24 +528,24 @@ pub const MNEMONICS: &[(&str, Mnemonic)] = &[
 pub enum MemOffset {
     Imm(i32),
     /// Register offset with subtract flag (true = subtract, false = add).
-    Reg(u8, bool),
+    Reg(u4, bool),
     /// Shifted register offset with subtract flag.
-    RegShift(u8, ShiftType, u8, bool),
+    RegShift(u4, ShiftType, u8, bool),
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Operand {
-    Reg(u8),
+    Reg(u4),
     Imm(i64),
     Label(String),
     RegList(u16),
     Memory {
-        base: u8,
+        base: u4,
         offset: MemOffset,
         pre_index: bool,
         writeback: bool,
     },
-    Shifted(u8, ShiftType, Box<Operand>),
+    Shifted(u4, ShiftType, Box<Operand>),
     SysReg(u8), // system register encoding (for MRS/MSR)
 }
 

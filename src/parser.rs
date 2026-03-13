@@ -1,3 +1,5 @@
+use arbitrary_int::u4;
+
 use crate::ast::*;
 use crate::error::AsmError;
 use crate::lexer::{Token, TokenKind};
@@ -335,7 +337,7 @@ impl<'a> Parser<'a> {
         false
     }
 
-    fn parse_shift(&mut self, reg: u8) -> Result<Operand, AsmError> {
+    fn parse_shift(&mut self, reg: u4) -> Result<Operand, AsmError> {
         let shift_str = match self.advance().kind.clone() {
             TokenKind::Ident(s) => s,
             _ => return Err(AsmError::new(self.line(), "expected shift type")),
@@ -509,11 +511,11 @@ impl<'a> Parser<'a> {
             let reg = self.parse_reg()?;
             if self.eat(&TokenKind::Minus) {
                 let end_reg = self.parse_reg()?;
-                for r in reg..=end_reg {
+                for r in reg.value()..=end_reg.value() {
                     mask |= 1 << r;
                 }
             } else {
-                mask |= 1 << reg;
+                mask |= 1 << reg.value();
             }
 
             if !self.eat(&TokenKind::Comma) {
@@ -525,7 +527,7 @@ impl<'a> Parser<'a> {
         Ok(Operand::RegList(mask))
     }
 
-    fn parse_reg(&mut self) -> Result<u8, AsmError> {
+    fn parse_reg(&mut self) -> Result<u4, AsmError> {
         let line = self.line();
         match self.advance().kind.clone() {
             TokenKind::Ident(s) => parse_register(&s)
@@ -614,24 +616,24 @@ impl<'a> Parser<'a> {
     }
 }
 
-fn parse_register(s: &str) -> Option<u8> {
+fn parse_register(s: &str) -> Option<u4> {
     match s.to_ascii_uppercase().as_str() {
-        "R0" => Some(0),
-        "R1" => Some(1),
-        "R2" => Some(2),
-        "R3" => Some(3),
-        "R4" => Some(4),
-        "R5" => Some(5),
-        "R6" => Some(6),
-        "R7" => Some(7),
-        "R8" => Some(8),
-        "R9" => Some(9),
-        "R10" => Some(10),
-        "R11" | "FP" => Some(11),
-        "R12" | "IP" => Some(12),
-        "R13" | "SP" => Some(13),
-        "R14" | "LR" => Some(14),
-        "R15" | "PC" => Some(15),
+        "R0" => Some(u4::new(0)),
+        "R1" => Some(u4::new(1)),
+        "R2" => Some(u4::new(2)),
+        "R3" => Some(u4::new(3)),
+        "R4" => Some(u4::new(4)),
+        "R5" => Some(u4::new(5)),
+        "R6" => Some(u4::new(6)),
+        "R7" => Some(u4::new(7)),
+        "R8" => Some(u4::new(8)),
+        "R9" => Some(u4::new(9)),
+        "R10" => Some(u4::new(10)),
+        "R11" | "FP" => Some(u4::new(11)),
+        "R12" | "IP" => Some(u4::new(12)),
+        "R13" | "SP" => Some(u4::new(13)),
+        "R14" | "LR" => Some(u4::new(14)),
+        "R15" | "PC" => Some(u4::new(15)),
         _ => None,
     }
 }
