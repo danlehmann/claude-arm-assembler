@@ -3,6 +3,7 @@ use bitbybit::bitenum;
 
 /// Well-known register constants for pattern matching.
 pub const SP: u4 = u4::new(13);
+#[allow(dead_code)]
 pub const LR: u4 = u4::new(14);
 pub const PC: u4 = u4::new(15);
 
