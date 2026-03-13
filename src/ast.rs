@@ -428,7 +428,7 @@ pub const MNEMONICS: &[(&str, Mnemonic)] = &[
     ("USUB8", Mnemonic::Usub8),
     ("QADD8", Mnemonic::Qadd8),
     ("QSUB8", Mnemonic::Qsub8),
-    ("LDRT", Mnemonic::Ldrt),  // 4 char
+    ("LDRT", Mnemonic::Ldrt), // 4 char
     ("STRT", Mnemonic::Strt),
     // --- 4 characters ---
     ("MOVW", Mnemonic::Movw),

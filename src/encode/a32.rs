@@ -31,7 +31,7 @@ struct DpImm {
     #[bit(25, rw)]
     imm_flag: bool, // 1 for immediate operand
     #[bits(26..=27, rw)]
-    class: u2,      // 00 for data processing
+    class: u2, // 00 for data processing
     #[bits(28..=31, rw)]
     cond: Condition,
 }
@@ -165,13 +165,13 @@ struct HalfWordImm {
     #[bits(0..=3, rw)]
     imm4l: u4,
     #[bit(4, rw)]
-    fixed4: bool,   // always 1
+    fixed4: bool, // always 1
     #[bit(5, rw)]
     h: bool,
     #[bit(6, rw)]
     s: bool,
     #[bit(7, rw)]
-    fixed7: bool,   // always 1
+    fixed7: bool, // always 1
     #[bits(8..=11, rw)]
     imm4h: u4,
     #[bits(12..=15, rw)]
@@ -183,7 +183,7 @@ struct HalfWordImm {
     #[bit(21, rw)]
     writeback: bool,
     #[bit(22, rw)]
-    imm_flag: bool,  // 1 for immediate offset
+    imm_flag: bool, // 1 for immediate offset
     #[bit(23, rw)]
     add: bool,
     #[bit(24, rw)]
@@ -209,13 +209,13 @@ struct HalfWordReg {
     #[bits(0..=3, rw)]
     rm: u4,
     #[bit(4, rw)]
-    fixed4: bool,   // always 1
+    fixed4: bool, // always 1
     #[bit(5, rw)]
     h: bool,
     #[bit(6, rw)]
     s: bool,
     #[bit(7, rw)]
-    fixed7: bool,   // always 1
+    fixed7: bool, // always 1
     // bits 8-11: 0000
     #[bits(12..=15, rw)]
     rt: u4,
@@ -237,9 +237,7 @@ struct HalfWordReg {
 
 impl HalfWordReg {
     fn new() -> Self {
-        Self::ZERO
-            .with_fixed4(true)
-            .with_fixed7(true)
+        Self::ZERO.with_fixed4(true).with_fixed7(true)
     }
 }
 
@@ -316,10 +314,10 @@ struct MulLong {
     #[bits(0..=3, rw)]
     rn: u4,
     #[bit(4, rw)]
-    fixed4: bool,  // always 1
+    fixed4: bool, // always 1
     // bits 5-6: 00
     #[bit(7, rw)]
-    fixed7: bool,  // always 1
+    fixed7: bool, // always 1
     #[bits(8..=11, rw)]
     rm: u4,
     #[bits(12..=15, rw)]
@@ -336,9 +334,7 @@ struct MulLong {
 
 impl MulLong {
     fn new() -> Self {
-        Self::ZERO
-            .with_fixed4(true)
-            .with_fixed7(true)
+        Self::ZERO.with_fixed4(true).with_fixed7(true)
     }
 }
 
@@ -354,8 +350,8 @@ pub fn encode_a32(
 ) -> Result<Vec<u8>, AsmError> {
     use Mnemonic::*;
     match inst.mnemonic {
-        Mov | Mvn | Add | Adc | Sub | Sbc | Rsb | Rsc | And | Orr | Eor | Bic | Cmp | Cmn
-        | Tst | Teq => encode_data_proc(inst),
+        Mov | Mvn | Add | Adc | Sub | Sbc | Rsb | Rsc | And | Orr | Eor | Bic | Cmp | Cmn | Tst
+        | Teq => encode_data_proc(inst),
         Movw | Movt => encode_movw_movt_a32(inst),
         Ldr | Ldrb => encode_ldr_a32(inst, offset, symbols, equs),
         Str | Strb => encode_str_a32(inst),
@@ -403,11 +399,10 @@ pub fn encode_a32(
         Smuad | Smusd | Smlad | Smlsd => encode_smuad_a32(inst),
         Smlald | Smlsld => encode_smlald_a32(inst),
         Usad8 | Usada8 => encode_usad8_a32(inst),
-        Sadd16 | Sadd8 | Ssub16 | Ssub8 | Uadd16 | Uadd8 | Usub16 | Usub8
-        | Qadd16 | Qadd8 | Qsub16 | Qsub8 | Shadd16 | Shadd8 | Shsub16 | Shsub8
-        | Uhadd16 | Uhadd8 | Uhsub16 | Uhsub8 | Uqadd16 | Uqadd8 | Uqsub16 | Uqsub8
-        | Sasx | Ssax | Uasx | Usax | Qasx | Qsax | Shasx | Shsax
-        | Uhasx | Uhsax | Uqasx | Uqsax => encode_parallel_a32(inst),
+        Sadd16 | Sadd8 | Ssub16 | Ssub8 | Uadd16 | Uadd8 | Usub16 | Usub8 | Qadd16 | Qadd8
+        | Qsub16 | Qsub8 | Shadd16 | Shadd8 | Shsub16 | Shsub8 | Uhadd16 | Uhadd8 | Uhsub16
+        | Uhsub8 | Uqadd16 | Uqadd8 | Uqsub16 | Uqsub8 | Sasx | Ssax | Uasx | Usax | Qasx
+        | Qsax | Shasx | Shsax | Uhasx | Uhsax | Uqasx | Uqsax => encode_parallel_a32(inst),
         Nop => {
             // NOP hint: cond 0011 0010 0000 1111 0000 0000 0000 0000
             // opcode=1001 (TEQ), S=0, Rn=0, Rd=15
@@ -551,35 +546,36 @@ fn encode_data_proc(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
                 .with_rm(*rm);
             Ok(emit32(enc.raw_value()))
         }
-        [Operand::Reg(rd), Operand::Shifted(rm, st, amount)] if is_move => {
-            match amount.as_ref() {
-                Operand::Imm(n) => {
-                    let enc = DpReg::new()
-                        .with_cond(cond_val(inst))
-                        .with_opcode(opcode)
-                        .with_s(s)
-                        .with_rn(u4::new(0))
-                        .with_rd(*rd)
-                        .with_rm(*rm)
-                        .with_shift_type(u2::new(st.encoding() as u8))
-                        .with_shift_imm(u5::new((*n as u8) & 0x1F));
-                    Ok(emit32(enc.raw_value()))
-                }
-                Operand::Reg(rs) => {
-                    let enc = DpRegShift::new()
-                        .with_cond(cond_val(inst))
-                        .with_opcode(opcode)
-                        .with_s(s)
-                        .with_rn(u4::new(0))
-                        .with_rd(*rd)
-                        .with_rs(*rs)
-                        .with_shift_type(u2::new(st.encoding() as u8))
-                        .with_rm(*rm);
-                    Ok(emit32(enc.raw_value()))
-                }
-                _ => Err(AsmError::new(line, "expected immediate or register shift amount")),
+        [Operand::Reg(rd), Operand::Shifted(rm, st, amount)] if is_move => match amount.as_ref() {
+            Operand::Imm(n) => {
+                let enc = DpReg::new()
+                    .with_cond(cond_val(inst))
+                    .with_opcode(opcode)
+                    .with_s(s)
+                    .with_rn(u4::new(0))
+                    .with_rd(*rd)
+                    .with_rm(*rm)
+                    .with_shift_type(u2::new(st.encoding() as u8))
+                    .with_shift_imm(u5::new((*n as u8) & 0x1F));
+                Ok(emit32(enc.raw_value()))
             }
-        }
+            Operand::Reg(rs) => {
+                let enc = DpRegShift::new()
+                    .with_cond(cond_val(inst))
+                    .with_opcode(opcode)
+                    .with_s(s)
+                    .with_rn(u4::new(0))
+                    .with_rd(*rd)
+                    .with_rs(*rs)
+                    .with_shift_type(u2::new(st.encoding() as u8))
+                    .with_rm(*rm);
+                Ok(emit32(enc.raw_value()))
+            }
+            _ => Err(AsmError::new(
+                line,
+                "expected immediate or register shift amount",
+            )),
+        },
         // CMP/CMN/TST/TEQ Rn, #imm
         [Operand::Reg(rn), Operand::Imm(imm)] if is_test => {
             let (imm8, rot) = encode_imm12(*imm as u32)
@@ -606,34 +602,32 @@ fn encode_data_proc(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
             Ok(emit32(enc.raw_value()))
         }
         // CMP/CMN/TST/TEQ Rn, Rm, shift
-        [Operand::Reg(rn), Operand::Shifted(rm, st, amount)] if is_test => {
-            match amount.as_ref() {
-                Operand::Imm(n) => {
-                    let enc = DpReg::new()
-                        .with_cond(cond_val(inst))
-                        .with_opcode(opcode)
-                        .with_s(true)
-                        .with_rn(*rn)
-                        .with_rd(u4::new(0))
-                        .with_rm(*rm)
-                        .with_shift_type(u2::new(st.encoding() as u8))
-                        .with_shift_imm(u5::new((*n as u8) & 0x1F));
-                    Ok(emit32(enc.raw_value()))
-                }
-                Operand::Reg(rs) => {
-                    let enc = DpRegShift::new()
-                        .with_cond(cond_val(inst))
-                        .with_opcode(opcode)
-                        .with_s(true)
-                        .with_rn(*rn)
-                        .with_rs(*rs)
-                        .with_shift_type(u2::new(st.encoding() as u8))
-                        .with_rm(*rm);
-                    Ok(emit32(enc.raw_value()))
-                }
-                _ => Err(AsmError::new(line, "expected imm or reg shift")),
+        [Operand::Reg(rn), Operand::Shifted(rm, st, amount)] if is_test => match amount.as_ref() {
+            Operand::Imm(n) => {
+                let enc = DpReg::new()
+                    .with_cond(cond_val(inst))
+                    .with_opcode(opcode)
+                    .with_s(true)
+                    .with_rn(*rn)
+                    .with_rd(u4::new(0))
+                    .with_rm(*rm)
+                    .with_shift_type(u2::new(st.encoding() as u8))
+                    .with_shift_imm(u5::new((*n as u8) & 0x1F));
+                Ok(emit32(enc.raw_value()))
             }
-        }
+            Operand::Reg(rs) => {
+                let enc = DpRegShift::new()
+                    .with_cond(cond_val(inst))
+                    .with_opcode(opcode)
+                    .with_s(true)
+                    .with_rn(*rn)
+                    .with_rs(*rs)
+                    .with_shift_type(u2::new(st.encoding() as u8))
+                    .with_rm(*rm);
+                Ok(emit32(enc.raw_value()))
+            }
+            _ => Err(AsmError::new(line, "expected imm or reg shift")),
+        },
         // Normal: ADD/SUB/etc Rd, Rn, #imm
         [Operand::Reg(rd), Operand::Reg(rn), Operand::Imm(imm)] => {
             let (imm8, rot) = encode_imm12(*imm as u32)
@@ -686,7 +680,10 @@ fn encode_data_proc(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
                         .with_rm(*rm);
                     Ok(emit32(enc.raw_value()))
                 }
-                _ => Err(AsmError::new(line, "expected immediate or register shift amount")),
+                _ => Err(AsmError::new(
+                    line,
+                    "expected immediate or register shift amount",
+                )),
             }
         }
         // Two-operand form: ADD Rd, #imm (Rd is both dest and source)
@@ -724,8 +721,12 @@ fn encode_ldr_a32(
     let byte = inst.mnemonic == Mnemonic::Ldrb;
 
     match inst.operands.as_slice() {
-        [Operand::Reg(rt), Operand::Memory { base, offset: MemOffset::Imm(imm), pre_index, writeback }] =>
-        {
+        [Operand::Reg(rt), Operand::Memory {
+            base,
+            offset: MemOffset::Imm(imm),
+            pre_index,
+            writeback,
+        }] => {
             let (add, abs_imm) = if *imm >= 0 {
                 (true, *imm as u32)
             } else {
@@ -748,7 +749,12 @@ fn encode_ldr_a32(
             Ok(emit32(enc.raw_value()))
         }
         // LDR Rt, [Rn, Rm] / [Rn, -Rm] / [Rn], Rm
-        [Operand::Reg(rt), Operand::Memory { base, offset: MemOffset::Reg(rm, sub), pre_index, writeback }] => {
+        [Operand::Reg(rt), Operand::Memory {
+            base,
+            offset: MemOffset::Reg(rm, sub),
+            pre_index,
+            writeback,
+        }] => {
             let enc = LdrStrReg::new()
                 .with_cond(cond_val(inst))
                 .with_pre(*pre_index)
@@ -762,7 +768,12 @@ fn encode_ldr_a32(
             Ok(emit32(enc.raw_value()))
         }
         // LDR Rt, [Rn, Rm, shift #amt] / [Rn, -Rm, shift #amt]
-        [Operand::Reg(rt), Operand::Memory { base, offset: MemOffset::RegShift(rm, st, amt, sub), pre_index, writeback }] => {
+        [Operand::Reg(rt), Operand::Memory {
+            base,
+            offset: MemOffset::RegShift(rm, st, amt, sub),
+            pre_index,
+            writeback,
+        }] => {
             let enc = LdrStrReg::new()
                 .with_cond(cond_val(inst))
                 .with_pre(*pre_index)
@@ -810,8 +821,12 @@ fn encode_str_a32(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
     let byte = inst.mnemonic == Mnemonic::Strb;
 
     match inst.operands.as_slice() {
-        [Operand::Reg(rt), Operand::Memory { base, offset: MemOffset::Imm(imm), pre_index, writeback }] =>
-        {
+        [Operand::Reg(rt), Operand::Memory {
+            base,
+            offset: MemOffset::Imm(imm),
+            pre_index,
+            writeback,
+        }] => {
             let (add, abs_imm) = if *imm >= 0 {
                 (true, *imm as u32)
             } else {
@@ -833,7 +848,12 @@ fn encode_str_a32(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
             Ok(emit32(enc.raw_value()))
         }
         // STR Rt, [Rn, Rm] / [Rn, -Rm] / [Rn], Rm
-        [Operand::Reg(rt), Operand::Memory { base, offset: MemOffset::Reg(rm, sub), pre_index, writeback }] => {
+        [Operand::Reg(rt), Operand::Memory {
+            base,
+            offset: MemOffset::Reg(rm, sub),
+            pre_index,
+            writeback,
+        }] => {
             let enc = LdrStrReg::new()
                 .with_cond(cond_val(inst))
                 .with_pre(*pre_index)
@@ -847,7 +867,12 @@ fn encode_str_a32(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
             Ok(emit32(enc.raw_value()))
         }
         // STR Rt, [Rn, Rm, shift #amt] / [Rn, -Rm, shift #amt]
-        [Operand::Reg(rt), Operand::Memory { base, offset: MemOffset::RegShift(rm, st, amt, sub), pre_index, writeback }] => {
+        [Operand::Reg(rt), Operand::Memory {
+            base,
+            offset: MemOffset::RegShift(rm, st, amt, sub),
+            pre_index,
+            writeback,
+        }] => {
             let enc = LdrStrReg::new()
                 .with_cond(cond_val(inst))
                 .with_pre(*pre_index)
@@ -1105,11 +1130,16 @@ fn encode_movw_movt_a32(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
         return Err(AsmError::new(line, "MOVW/MOVT: immediate out of range"));
     }
     let c = cond_bits(inst);
-    let top = if inst.mnemonic == Mnemonic::Movt { 1u32 << 22 } else { 0 };
+    let top = if inst.mnemonic == Mnemonic::Movt {
+        1u32 << 22
+    } else {
+        0
+    };
     // cond 0011 0x00 imm4 Rd imm12
     let imm4 = (imm16 >> 12) & 0xF;
     let imm12 = imm16 & 0xFFF;
-    let enc: u32 = (c << 28) | 0x0300_0000 | top | (imm4 << 16) | ((rd.value() as u32) << 12) | imm12;
+    let enc: u32 =
+        (c << 28) | 0x0300_0000 | top | (imm4 << 16) | ((rd.value() as u32) << 12) | imm12;
     Ok(emit32(enc))
 }
 
@@ -1125,16 +1155,30 @@ fn encode_ldr_half_a32(
 ) -> Result<Vec<u8>, AsmError> {
     let line = inst.line;
     let (s_bit, h_bit) = match inst.mnemonic {
-        Mnemonic::Ldrh  => (false, true),
+        Mnemonic::Ldrh => (false, true),
         Mnemonic::Ldrsh => (true, true),
         Mnemonic::Ldrsb => (true, false),
         _ => unreachable!(),
     };
 
     match inst.operands.as_slice() {
-        [Operand::Reg(rt), Operand::Memory { base, offset: MemOffset::Imm(imm), pre_index, writeback }] => {
-            let (add, abs) = if *imm >= 0 { (true, *imm as u32) } else { (false, (-*imm) as u32) };
-            if abs > 255 { return Err(AsmError::new(line, "halfword offset out of range (max 255)")); }
+        [Operand::Reg(rt), Operand::Memory {
+            base,
+            offset: MemOffset::Imm(imm),
+            pre_index,
+            writeback,
+        }] => {
+            let (add, abs) = if *imm >= 0 {
+                (true, *imm as u32)
+            } else {
+                (false, (-*imm) as u32)
+            };
+            if abs > 255 {
+                return Err(AsmError::new(
+                    line,
+                    "halfword offset out of range (max 255)",
+                ));
+            }
             let enc = HalfWordImm::new()
                 .with_cond(cond_val(inst))
                 .with_pre(*pre_index)
@@ -1149,7 +1193,12 @@ fn encode_ldr_half_a32(
                 .with_imm4l(u4::new((abs & 0xF) as u8));
             Ok(emit32(enc.raw_value()))
         }
-        [Operand::Reg(rt), Operand::Memory { base, offset: MemOffset::Reg(rm, sub), pre_index, writeback }] => {
+        [Operand::Reg(rt), Operand::Memory {
+            base,
+            offset: MemOffset::Reg(rm, sub),
+            pre_index,
+            writeback,
+        }] => {
             let enc = HalfWordReg::new()
                 .with_cond(cond_val(inst))
                 .with_pre(*pre_index)
@@ -1167,8 +1216,17 @@ fn encode_ldr_half_a32(
             let target = resolve_label(name, symbols, equs, line)?;
             let pc = offset + 8;
             let disp = target as i32 - pc as i32;
-            let (add, abs) = if disp >= 0 { (true, disp as u32) } else { (false, (-disp) as u32) };
-            if abs > 255 { return Err(AsmError::new(line, "halfword PC-relative offset out of range")); }
+            let (add, abs) = if disp >= 0 {
+                (true, disp as u32)
+            } else {
+                (false, (-disp) as u32)
+            };
+            if abs > 255 {
+                return Err(AsmError::new(
+                    line,
+                    "halfword PC-relative offset out of range",
+                ));
+            }
             let enc = HalfWordImm::new()
                 .with_cond(cond_val(inst))
                 .with_pre(true)
@@ -1189,9 +1247,20 @@ fn encode_ldr_half_a32(
 fn encode_strh_a32(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
     let line = inst.line;
     match inst.operands.as_slice() {
-        [Operand::Reg(rt), Operand::Memory { base, offset: MemOffset::Imm(imm), pre_index, writeback }] => {
-            let (add, abs) = if *imm >= 0 { (true, *imm as u32) } else { (false, (-*imm) as u32) };
-            if abs > 255 { return Err(AsmError::new(line, "STRH offset out of range")); }
+        [Operand::Reg(rt), Operand::Memory {
+            base,
+            offset: MemOffset::Imm(imm),
+            pre_index,
+            writeback,
+        }] => {
+            let (add, abs) = if *imm >= 0 {
+                (true, *imm as u32)
+            } else {
+                (false, (-*imm) as u32)
+            };
+            if abs > 255 {
+                return Err(AsmError::new(line, "STRH offset out of range"));
+            }
             let enc = HalfWordImm::new()
                 .with_cond(cond_val(inst))
                 .with_pre(*pre_index)
@@ -1206,7 +1275,12 @@ fn encode_strh_a32(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
                 .with_imm4l(u4::new((abs & 0xF) as u8));
             Ok(emit32(enc.raw_value()))
         }
-        [Operand::Reg(rt), Operand::Memory { base, offset: MemOffset::Reg(rm, sub), pre_index, writeback }] => {
+        [Operand::Reg(rt), Operand::Memory {
+            base,
+            offset: MemOffset::Reg(rm, sub),
+            pre_index,
+            writeback,
+        }] => {
             let enc = HalfWordReg::new()
                 .with_cond(cond_val(inst))
                 .with_pre(*pre_index)
@@ -1231,9 +1305,20 @@ fn encode_strh_a32(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
 fn encode_ldrd_a32(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
     let line = inst.line;
     match inst.operands.as_slice() {
-        [Operand::Reg(rt), Operand::Reg(_rt2), Operand::Memory { base, offset: MemOffset::Imm(imm), pre_index, writeback }] => {
-            let (add, abs) = if *imm >= 0 { (true, *imm as u32) } else { (false, (-*imm) as u32) };
-            if abs > 255 { return Err(AsmError::new(line, "LDRD offset out of range")); }
+        [Operand::Reg(rt), Operand::Reg(_rt2), Operand::Memory {
+            base,
+            offset: MemOffset::Imm(imm),
+            pre_index,
+            writeback,
+        }] => {
+            let (add, abs) = if *imm >= 0 {
+                (true, *imm as u32)
+            } else {
+                (false, (-*imm) as u32)
+            };
+            if abs > 255 {
+                return Err(AsmError::new(line, "LDRD offset out of range"));
+            }
             // LDRD: S=1 H=0 (0xD0 = 1101_0000)
             let enc = HalfWordImm::new()
                 .with_cond(cond_val(inst))
@@ -1256,9 +1341,20 @@ fn encode_ldrd_a32(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
 fn encode_strd_a32(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
     let line = inst.line;
     match inst.operands.as_slice() {
-        [Operand::Reg(rt), Operand::Reg(_rt2), Operand::Memory { base, offset: MemOffset::Imm(imm), pre_index, writeback }] => {
-            let (add, abs) = if *imm >= 0 { (true, *imm as u32) } else { (false, (-*imm) as u32) };
-            if abs > 255 { return Err(AsmError::new(line, "STRD offset out of range")); }
+        [Operand::Reg(rt), Operand::Reg(_rt2), Operand::Memory {
+            base,
+            offset: MemOffset::Imm(imm),
+            pre_index,
+            writeback,
+        }] => {
+            let (add, abs) = if *imm >= 0 {
+                (true, *imm as u32)
+            } else {
+                (false, (-*imm) as u32)
+            };
+            if abs > 255 {
+                return Err(AsmError::new(line, "STRD offset out of range"));
+            }
             // STRD: S=1 H=1 (0xF0 = 1111_0000)
             let enc = HalfWordImm::new()
                 .with_cond(cond_val(inst))
@@ -1430,7 +1526,10 @@ fn encode_long_mul_a32(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
                 .with_rn(*rn);
             Ok(emit32(enc.raw_value()))
         }
-        _ => Err(AsmError::new(line, "long multiply: need RdLo, RdHi, Rn, Rm")),
+        _ => Err(AsmError::new(
+            line,
+            "long multiply: need RdLo, RdHi, Rn, Rm",
+        )),
     }
 }
 
@@ -1443,9 +1542,17 @@ fn encode_div_a32(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
     match inst.operands.as_slice() {
         [Operand::Reg(rd), Operand::Reg(rn), Operand::Reg(rm)] => {
             let c = cond_bits(inst);
-            let op = if inst.mnemonic == Mnemonic::Sdiv { 0x0710_0010u32 } else { 0x0730_0010 };
-            let enc: u32 = (c << 28) | op
-                | ((rd.value() as u32) << 16) | (0xF << 12) | ((rm.value() as u32) << 8) | (rn.value() as u32);
+            let op = if inst.mnemonic == Mnemonic::Sdiv {
+                0x0710_0010u32
+            } else {
+                0x0730_0010
+            };
+            let enc: u32 = (c << 28)
+                | op
+                | ((rd.value() as u32) << 16)
+                | (0xF << 12)
+                | ((rm.value() as u32) << 8)
+                | (rn.value() as u32);
             Ok(emit32(enc))
         }
         _ => Err(AsmError::new(line, "DIV: need Rd, Rn, Rm")),
@@ -1462,7 +1569,8 @@ fn encode_clz_a32(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
         [Operand::Reg(rd), Operand::Reg(rm)] => {
             let c = cond_bits(inst);
             // cond 0001 0110 1111 Rd 1111 0001 Rm
-            let enc: u32 = (c << 28) | 0x016F_0F10 | ((rd.value() as u32) << 12) | (rm.value() as u32);
+            let enc: u32 =
+                (c << 28) | 0x016F_0F10 | ((rd.value() as u32) << 12) | (rm.value() as u32);
             Ok(emit32(enc))
         }
         _ => Err(AsmError::new(line, "CLZ: need Rd, Rm")),
@@ -1475,7 +1583,8 @@ fn encode_rbit_a32(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
         [Operand::Reg(rd), Operand::Reg(rm)] => {
             let c = cond_bits(inst);
             // cond 0110 1111 1111 Rd 1111 0011 Rm
-            let enc: u32 = (c << 28) | 0x06FF_0F30 | ((rd.value() as u32) << 12) | (rm.value() as u32);
+            let enc: u32 =
+                (c << 28) | 0x06FF_0F30 | ((rd.value() as u32) << 12) | (rm.value() as u32);
             Ok(emit32(enc))
         }
         _ => Err(AsmError::new(line, "RBIT: need Rd, Rm")),
@@ -1493,8 +1602,12 @@ fn encode_bfi_a32(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
             let c = cond_bits(inst);
             let msb = *lsb as u32 + *width as u32 - 1;
             // cond 0111 110 msb Rd lsb 001 Rn
-            let enc: u32 = (c << 28) | 0x07C0_0010
-                | (msb << 16) | ((rd.value() as u32) << 12) | ((*lsb as u32) << 7) | (rn.value() as u32);
+            let enc: u32 = (c << 28)
+                | 0x07C0_0010
+                | (msb << 16)
+                | ((rd.value() as u32) << 12)
+                | ((*lsb as u32) << 7)
+                | (rn.value() as u32);
             Ok(emit32(enc))
         }
         _ => Err(AsmError::new(line, "BFI: need Rd, Rn, #lsb, #width")),
@@ -1508,8 +1621,11 @@ fn encode_bfc_a32(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
             let c = cond_bits(inst);
             let msb = *lsb as u32 + *width as u32 - 1;
             // cond 0111 110 msb Rd lsb 001 1111
-            let enc: u32 = (c << 28) | 0x07C0_001F
-                | (msb << 16) | ((rd.value() as u32) << 12) | ((*lsb as u32) << 7);
+            let enc: u32 = (c << 28)
+                | 0x07C0_001F
+                | (msb << 16)
+                | ((rd.value() as u32) << 12)
+                | ((*lsb as u32) << 7);
             Ok(emit32(enc))
         }
         _ => Err(AsmError::new(line, "BFC: need Rd, #lsb, #width")),
@@ -1522,10 +1638,18 @@ fn encode_bfx_a32(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
         [Operand::Reg(rd), Operand::Reg(rn), Operand::Imm(lsb), Operand::Imm(width)] => {
             let c = cond_bits(inst);
             let widthm1 = *width as u32 - 1;
-            let op = if inst.mnemonic == Mnemonic::Sbfx { 0x07A0_0050u32 } else { 0x07E0_0050 };
+            let op = if inst.mnemonic == Mnemonic::Sbfx {
+                0x07A0_0050u32
+            } else {
+                0x07E0_0050
+            };
             // cond 0111 1x1 widthm1 Rd lsb 101 Rn
-            let enc: u32 = (c << 28) | op
-                | (widthm1 << 16) | ((rd.value() as u32) << 12) | ((*lsb as u32) << 7) | (rn.value() as u32);
+            let enc: u32 = (c << 28)
+                | op
+                | (widthm1 << 16)
+                | ((rd.value() as u32) << 12)
+                | ((*lsb as u32) << 7)
+                | (rn.value() as u32);
             Ok(emit32(enc))
         }
         _ => Err(AsmError::new(line, "UBFX/SBFX: need Rd, Rn, #lsb, #width")),
@@ -1552,10 +1676,10 @@ fn encode_extend_a32(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
     let c = cond_bits(inst);
     // cond 0110 1UBx 1111 Rd rot 0111 Rm
     let op = match inst.mnemonic {
-        Mnemonic::Sxth   => 0x06BF_0070u32,
-        Mnemonic::Sxtb   => 0x06AF_0070,
-        Mnemonic::Uxth   => 0x06FF_0070,
-        Mnemonic::Uxtb   => 0x06EF_0070,
+        Mnemonic::Sxth => 0x06BF_0070u32,
+        Mnemonic::Sxtb => 0x06AF_0070,
+        Mnemonic::Uxth => 0x06FF_0070,
+        Mnemonic::Uxtb => 0x06EF_0070,
         Mnemonic::Sxtb16 => 0x068F_0070,
         Mnemonic::Uxtb16 => 0x06CF_0070,
         _ => unreachable!(),
@@ -1575,7 +1699,12 @@ fn encode_extend_add_a32(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
         [Operand::Reg(rd), Operand::Reg(rn), Operand::Shifted(rm, ShiftType::Ror, amount)] => {
             let rot = match amount.as_ref() {
                 Operand::Imm(n) => (*n as u32 / 8) & 3,
-                _ => return Err(AsmError::new(line, "extend-add: rotation must be immediate")),
+                _ => {
+                    return Err(AsmError::new(
+                        line,
+                        "extend-add: rotation must be immediate",
+                    ))
+                }
             };
             (*rd, *rn, *rm, rot)
         }
@@ -1583,15 +1712,20 @@ fn encode_extend_add_a32(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
     };
     let c = cond_bits(inst);
     let op = match inst.mnemonic {
-        Mnemonic::Sxtah   => 0x06B0_0070u32,
-        Mnemonic::Sxtab   => 0x06A0_0070,
-        Mnemonic::Uxtah   => 0x06F0_0070,
-        Mnemonic::Uxtab   => 0x06E0_0070,
+        Mnemonic::Sxtah => 0x06B0_0070u32,
+        Mnemonic::Sxtab => 0x06A0_0070,
+        Mnemonic::Uxtah => 0x06F0_0070,
+        Mnemonic::Uxtab => 0x06E0_0070,
         Mnemonic::Sxtab16 => 0x0680_0070,
         Mnemonic::Uxtab16 => 0x06C0_0070,
         _ => unreachable!(),
     };
-    let enc: u32 = (c << 28) | op | ((rn.value() as u32) << 16) | ((rd.value() as u32) << 12) | (rot << 10) | (rm.value() as u32);
+    let enc: u32 = (c << 28)
+        | op
+        | ((rn.value() as u32) << 16)
+        | ((rd.value() as u32) << 12)
+        | (rot << 10)
+        | (rm.value() as u32);
     Ok(emit32(enc))
 }
 
@@ -1605,7 +1739,7 @@ fn encode_rev_a32(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
         [Operand::Reg(rd), Operand::Reg(rm)] => {
             let c = cond_bits(inst);
             let op = match inst.mnemonic {
-                Mnemonic::Rev   => 0x06BF_0F30u32,
+                Mnemonic::Rev => 0x06BF_0F30u32,
                 Mnemonic::Rev16 => 0x06BF_0FB0,
                 Mnemonic::Revsh => 0x06FF_0FB0,
                 _ => unreachable!(),
@@ -1624,10 +1758,17 @@ fn encode_rev_a32(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
 fn encode_ldrex_a32(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
     let line = inst.line;
     match inst.operands.as_slice() {
-        [Operand::Reg(rt), Operand::Memory { base, offset: MemOffset::Imm(0), .. }] => {
+        [Operand::Reg(rt), Operand::Memory {
+            base,
+            offset: MemOffset::Imm(0),
+            ..
+        }] => {
             let c = cond_bits(inst);
             // cond 0001 1001 Rn Rt 1111 1001 1111
-            let enc: u32 = (c << 28) | 0x0190_0F9F | ((base.value() as u32) << 16) | ((rt.value() as u32) << 12);
+            let enc: u32 = (c << 28)
+                | 0x0190_0F9F
+                | ((base.value() as u32) << 16)
+                | ((rt.value() as u32) << 12);
             Ok(emit32(enc))
         }
         _ => Err(AsmError::new(line, "LDREX: need Rt, [Rn]")),
@@ -1637,11 +1778,18 @@ fn encode_ldrex_a32(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
 fn encode_strex_a32(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
     let line = inst.line;
     match inst.operands.as_slice() {
-        [Operand::Reg(rd), Operand::Reg(rt), Operand::Memory { base, offset: MemOffset::Imm(0), .. }] => {
+        [Operand::Reg(rd), Operand::Reg(rt), Operand::Memory {
+            base,
+            offset: MemOffset::Imm(0),
+            ..
+        }] => {
             let c = cond_bits(inst);
             // cond 0001 1000 Rn Rd 1111 1001 Rt
-            let enc: u32 = (c << 28) | 0x0180_0F90
-                | ((base.value() as u32) << 16) | ((rd.value() as u32) << 12) | (rt.value() as u32);
+            let enc: u32 = (c << 28)
+                | 0x0180_0F90
+                | ((base.value() as u32) << 16)
+                | ((rd.value() as u32) << 12)
+                | (rt.value() as u32);
             Ok(emit32(enc))
         }
         _ => Err(AsmError::new(line, "STREX: need Rd, Rt, [Rn]")),
@@ -1651,14 +1799,19 @@ fn encode_strex_a32(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
 fn encode_ldrex_bhd_a32(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
     let line = inst.line;
     match inst.operands.as_slice() {
-        [Operand::Reg(rt), Operand::Memory { base, offset: MemOffset::Imm(0), .. }] => {
+        [Operand::Reg(rt), Operand::Memory {
+            base,
+            offset: MemOffset::Imm(0),
+            ..
+        }] => {
             let c = cond_bits(inst);
             let op = match inst.mnemonic {
                 Mnemonic::Ldrexb => 0x01D0_0F9Fu32,
                 Mnemonic::Ldrexh => 0x01F0_0F9F,
                 _ => unreachable!(),
             };
-            let enc: u32 = (c << 28) | op | ((base.value() as u32) << 16) | ((rt.value() as u32) << 12);
+            let enc: u32 =
+                (c << 28) | op | ((base.value() as u32) << 16) | ((rt.value() as u32) << 12);
             Ok(emit32(enc))
         }
         _ => Err(AsmError::new(line, "LDREXB/H/D: need Rt, [Rn]")),
@@ -1668,14 +1821,22 @@ fn encode_ldrex_bhd_a32(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
 fn encode_strex_bhd_a32(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
     let line = inst.line;
     match inst.operands.as_slice() {
-        [Operand::Reg(rd), Operand::Reg(rt), Operand::Memory { base, offset: MemOffset::Imm(0), .. }] => {
+        [Operand::Reg(rd), Operand::Reg(rt), Operand::Memory {
+            base,
+            offset: MemOffset::Imm(0),
+            ..
+        }] => {
             let c = cond_bits(inst);
             let op = match inst.mnemonic {
                 Mnemonic::Strexb => 0x01C0_0F90u32,
                 Mnemonic::Strexh => 0x01E0_0F90,
                 _ => unreachable!(),
             };
-            let enc: u32 = (c << 28) | op | ((base.value() as u32) << 16) | ((rd.value() as u32) << 12) | (rt.value() as u32);
+            let enc: u32 = (c << 28)
+                | op
+                | ((base.value() as u32) << 16)
+                | ((rd.value() as u32) << 12)
+                | (rt.value() as u32);
             Ok(emit32(enc))
         }
         _ => Err(AsmError::new(line, "STREXB/H/D: need Rd, Rt, [Rn]")),
@@ -1725,9 +1886,13 @@ fn encode_ssat_a32(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
     let _ = line;
     let c = cond_bits(inst);
     // cond 0110 101 sat_imm Rd shift_imm shift 01 Rn
-    let enc: u32 = (c << 28) | 0x06A0_0010
-        | (((sat - 1) as u32) << 16) | ((rd.value() as u32) << 12)
-        | ((sh_amt as u32) << 7) | ((sh as u32) << 6) | (rn.value() as u32);
+    let enc: u32 = (c << 28)
+        | 0x06A0_0010
+        | (((sat - 1) as u32) << 16)
+        | ((rd.value() as u32) << 12)
+        | ((sh_amt as u32) << 7)
+        | ((sh as u32) << 6)
+        | (rn.value() as u32);
     Ok(emit32(enc))
 }
 
@@ -1737,18 +1902,20 @@ fn encode_usat_a32(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
     let _ = line;
     let c = cond_bits(inst);
     // cond 0110 111 sat_imm Rd shift_imm shift 01 Rn
-    let enc: u32 = (c << 28) | 0x06E0_0010
-        | ((sat as u32) << 16) | ((rd.value() as u32) << 12)
-        | ((sh_amt as u32) << 7) | ((sh as u32) << 6) | (rn.value() as u32);
+    let enc: u32 = (c << 28)
+        | 0x06E0_0010
+        | ((sat as u32) << 16)
+        | ((rd.value() as u32) << 12)
+        | ((sh_amt as u32) << 7)
+        | ((sh as u32) << 6)
+        | (rn.value() as u32);
     Ok(emit32(enc))
 }
 
 fn parse_sat_ops_a32(inst: &Instruction) -> Result<(u4, u8, u4, u8, u8), AsmError> {
     let line = inst.line;
     match inst.operands.as_slice() {
-        [Operand::Reg(rd), Operand::Imm(sat), Operand::Reg(rn)] => {
-            Ok((*rd, *sat as u8, *rn, 0, 0))
-        }
+        [Operand::Reg(rd), Operand::Imm(sat), Operand::Reg(rn)] => Ok((*rd, *sat as u8, *rn, 0, 0)),
         [Operand::Reg(rd), Operand::Imm(sat), Operand::Shifted(rn, st, amount)] => {
             let sh = match st {
                 ShiftType::Lsl => 0u8,
@@ -1775,14 +1942,17 @@ fn encode_sat_arith_a32(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
         [Operand::Reg(rd), Operand::Reg(rm), Operand::Reg(rn)] => {
             let c = cond_bits(inst);
             let op = match inst.mnemonic {
-                Mnemonic::Qadd  => 0x0100_0050u32,
-                Mnemonic::Qsub  => 0x0120_0050,
+                Mnemonic::Qadd => 0x0100_0050u32,
+                Mnemonic::Qsub => 0x0120_0050,
                 Mnemonic::Qdadd => 0x0140_0050,
                 Mnemonic::Qdsub => 0x0160_0050,
                 _ => unreachable!(),
             };
-            let enc: u32 = (c << 28) | op
-                | ((rn.value() as u32) << 16) | ((rd.value() as u32) << 12) | (rm.value() as u32);
+            let enc: u32 = (c << 28)
+                | op
+                | ((rn.value() as u32) << 16)
+                | ((rd.value() as u32) << 12)
+                | (rm.value() as u32);
             Ok(emit32(enc))
         }
         _ => Err(AsmError::new(line, "QADD/etc: need Rd, Rm, Rn")),
@@ -1798,17 +1968,28 @@ fn encode_pkh_a32(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
     let (rd, rn, rm, sh_amt) = match inst.operands.as_slice() {
         [Operand::Reg(rd), Operand::Reg(rn), Operand::Reg(rm)] => (*rd, *rn, *rm, 0u8),
         [Operand::Reg(rd), Operand::Reg(rn), Operand::Shifted(rm, _st, amt)] => {
-            let a = match amt.as_ref() { Operand::Imm(n) => *n as u8, _ => return Err(AsmError::new(line, "PKH: need imm shift")) };
+            let a = match amt.as_ref() {
+                Operand::Imm(n) => *n as u8,
+                _ => return Err(AsmError::new(line, "PKH: need imm shift")),
+            };
             (*rd, *rn, *rm, a)
         }
         _ => return Err(AsmError::new(line, "PKHBT/PKHTB: need Rd, Rn, Rm")),
     };
     let c = cond_bits(inst);
-    let tb = if inst.mnemonic == Mnemonic::Pkhtb { 1u32 } else { 0 };
+    let tb = if inst.mnemonic == Mnemonic::Pkhtb {
+        1u32
+    } else {
+        0
+    };
     // cond 0110 1000 Rn Rd shift_imm tb 01 Rm
-    let enc: u32 = (c << 28) | 0x0680_0010
-        | ((rn.value() as u32) << 16) | ((rd.value() as u32) << 12) | ((sh_amt as u32) << 7)
-        | (tb << 6) | (rm.value() as u32);
+    let enc: u32 = (c << 28)
+        | 0x0680_0010
+        | ((rn.value() as u32) << 16)
+        | ((rd.value() as u32) << 12)
+        | ((sh_amt as u32) << 7)
+        | (tb << 6)
+        | (rm.value() as u32);
     Ok(emit32(enc))
 }
 
@@ -1822,8 +2003,11 @@ fn encode_sel_a32(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
         [Operand::Reg(rd), Operand::Reg(rn), Operand::Reg(rm)] => {
             let c = cond_bits(inst);
             // cond 0110 1000 Rn Rd 1111 1011 Rm
-            let enc: u32 = (c << 28) | 0x0680_0FB0
-                | ((rn.value() as u32) << 16) | ((rd.value() as u32) << 12) | (rm.value() as u32);
+            let enc: u32 = (c << 28)
+                | 0x0680_0FB0
+                | ((rn.value() as u32) << 16)
+                | ((rd.value() as u32) << 12)
+                | (rm.value() as u32);
             Ok(emit32(enc))
         }
         _ => Err(AsmError::new(line, "SEL: need Rd, Rn, Rm")),
@@ -1847,9 +2031,13 @@ fn encode_smulxy_a32(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
                 _ => unreachable!(),
             };
             // cond 0001 0110 Rd 0000 Rm 1xy0 Rn
-            let enc: u32 = (c << 28) | 0x0160_0080
-                | ((rd.value() as u32) << 16) | ((rm.value() as u32) << 8)
-                | (x << 5) | (y << 6) | (rn.value() as u32);
+            let enc: u32 = (c << 28)
+                | 0x0160_0080
+                | ((rd.value() as u32) << 16)
+                | ((rm.value() as u32) << 8)
+                | (x << 5)
+                | (y << 6)
+                | (rn.value() as u32);
             Ok(emit32(enc))
         }
         _ => Err(AsmError::new(line, "SMULxy: need Rd, Rn, Rm")),
@@ -1869,9 +2057,14 @@ fn encode_smlaxy_a32(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
                 _ => unreachable!(),
             };
             // cond 0001 0000 Rd Ra Rm 1xy0 Rn
-            let enc: u32 = (c << 28) | 0x0100_0080
-                | ((rd.value() as u32) << 16) | ((ra.value() as u32) << 12) | ((rm.value() as u32) << 8)
-                | (x << 5) | (y << 6) | (rn.value() as u32);
+            let enc: u32 = (c << 28)
+                | 0x0100_0080
+                | ((rd.value() as u32) << 16)
+                | ((ra.value() as u32) << 12)
+                | ((rm.value() as u32) << 8)
+                | (x << 5)
+                | (y << 6)
+                | (rn.value() as u32);
             Ok(emit32(enc))
         }
         _ => Err(AsmError::new(line, "SMLAxy: need Rd, Rn, Rm, Ra")),
@@ -1891,9 +2084,14 @@ fn encode_smlalxy_a32(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
                 _ => unreachable!(),
             };
             // cond 0001 0100 RdHi RdLo Rm 1xy0 Rn
-            let enc: u32 = (c << 28) | 0x0140_0080
-                | ((rdhi.value() as u32) << 16) | ((rdlo.value() as u32) << 12) | ((rm.value() as u32) << 8)
-                | (x << 5) | (y << 6) | (rn.value() as u32);
+            let enc: u32 = (c << 28)
+                | 0x0140_0080
+                | ((rdhi.value() as u32) << 16)
+                | ((rdlo.value() as u32) << 12)
+                | ((rm.value() as u32) << 8)
+                | (x << 5)
+                | (y << 6)
+                | (rn.value() as u32);
             Ok(emit32(enc))
         }
         _ => Err(AsmError::new(line, "SMLALxy: need RdLo, RdHi, Rn, Rm")),
@@ -1907,18 +2105,31 @@ fn encode_smlalxy_a32(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
 fn encode_smmul_a32(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
     let line = inst.line;
     match inst.operands.as_slice() {
-        [Operand::Reg(rd), Operand::Reg(rn), Operand::Reg(rm)] if inst.mnemonic == Mnemonic::Smmul => {
+        [Operand::Reg(rd), Operand::Reg(rn), Operand::Reg(rm)]
+            if inst.mnemonic == Mnemonic::Smmul =>
+        {
             let c = cond_bits(inst);
             // cond 0111 0101 Rd 1111 Rm 0001 Rn
-            let enc: u32 = (c << 28) | 0x0750_F010
-                | ((rd.value() as u32) << 16) | ((rm.value() as u32) << 8) | (rn.value() as u32);
+            let enc: u32 = (c << 28)
+                | 0x0750_F010
+                | ((rd.value() as u32) << 16)
+                | ((rm.value() as u32) << 8)
+                | (rn.value() as u32);
             Ok(emit32(enc))
         }
         [Operand::Reg(rd), Operand::Reg(rn), Operand::Reg(rm), Operand::Reg(ra)] => {
             let c = cond_bits(inst);
-            let op = if inst.mnemonic == Mnemonic::Smmla { 0x0750_0010u32 } else { 0x0750_00D0 };
-            let enc: u32 = (c << 28) | op
-                | ((rd.value() as u32) << 16) | ((ra.value() as u32) << 12) | ((rm.value() as u32) << 8) | (rn.value() as u32);
+            let op = if inst.mnemonic == Mnemonic::Smmla {
+                0x0750_0010u32
+            } else {
+                0x0750_00D0
+            };
+            let enc: u32 = (c << 28)
+                | op
+                | ((rd.value() as u32) << 16)
+                | ((ra.value() as u32) << 12)
+                | ((rm.value() as u32) << 8)
+                | (rn.value() as u32);
             Ok(emit32(enc))
         }
         _ => Err(AsmError::new(line, "SMMUL/SMMLA/SMMLS: invalid operands")),
@@ -1939,8 +2150,11 @@ fn encode_smuad_a32(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
                 Mnemonic::Smusd => 0x0700_F050,
                 _ => return Err(AsmError::new(line, "expected 3-operand DSP mul")),
             };
-            let enc: u32 = (c << 28) | op
-                | ((rd.value() as u32) << 16) | ((rm.value() as u32) << 8) | (rn.value() as u32);
+            let enc: u32 = (c << 28)
+                | op
+                | ((rd.value() as u32) << 16)
+                | ((rm.value() as u32) << 8)
+                | (rn.value() as u32);
             Ok(emit32(enc))
         }
         [Operand::Reg(rd), Operand::Reg(rn), Operand::Reg(rm), Operand::Reg(ra)] => {
@@ -1950,8 +2164,12 @@ fn encode_smuad_a32(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
                 Mnemonic::Smlsd => 0x0700_0050,
                 _ => return Err(AsmError::new(line, "expected 4-operand DSP mul")),
             };
-            let enc: u32 = (c << 28) | op
-                | ((rd.value() as u32) << 16) | ((ra.value() as u32) << 12) | ((rm.value() as u32) << 8) | (rn.value() as u32);
+            let enc: u32 = (c << 28)
+                | op
+                | ((rd.value() as u32) << 16)
+                | ((ra.value() as u32) << 12)
+                | ((rm.value() as u32) << 8)
+                | (rn.value() as u32);
             Ok(emit32(enc))
         }
         _ => Err(AsmError::new(line, "SMUAD/etc: invalid operands")),
@@ -1967,12 +2185,23 @@ fn encode_smlald_a32(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
     match inst.operands.as_slice() {
         [Operand::Reg(rdlo), Operand::Reg(rdhi), Operand::Reg(rn), Operand::Reg(rm)] => {
             let c = cond_bits(inst);
-            let op = if inst.mnemonic == Mnemonic::Smlald { 0x0740_0010u32 } else { 0x0740_0050 };
-            let enc: u32 = (c << 28) | op
-                | ((rdhi.value() as u32) << 16) | ((rdlo.value() as u32) << 12) | ((rm.value() as u32) << 8) | (rn.value() as u32);
+            let op = if inst.mnemonic == Mnemonic::Smlald {
+                0x0740_0010u32
+            } else {
+                0x0740_0050
+            };
+            let enc: u32 = (c << 28)
+                | op
+                | ((rdhi.value() as u32) << 16)
+                | ((rdlo.value() as u32) << 12)
+                | ((rm.value() as u32) << 8)
+                | (rn.value() as u32);
             Ok(emit32(enc))
         }
-        _ => Err(AsmError::new(line, "SMLALD/SMLSLD: need RdLo, RdHi, Rn, Rm")),
+        _ => Err(AsmError::new(
+            line,
+            "SMLALD/SMLSLD: need RdLo, RdHi, Rn, Rm",
+        )),
     }
 }
 
@@ -1983,17 +2212,26 @@ fn encode_smlald_a32(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
 fn encode_usad8_a32(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
     let line = inst.line;
     match inst.operands.as_slice() {
-        [Operand::Reg(rd), Operand::Reg(rn), Operand::Reg(rm)] if inst.mnemonic == Mnemonic::Usad8 => {
+        [Operand::Reg(rd), Operand::Reg(rn), Operand::Reg(rm)]
+            if inst.mnemonic == Mnemonic::Usad8 =>
+        {
             let c = cond_bits(inst);
             // cond 0111 1000 Rd 1111 Rm 0001 Rn
-            let enc: u32 = (c << 28) | 0x0780_F010
-                | ((rd.value() as u32) << 16) | ((rm.value() as u32) << 8) | (rn.value() as u32);
+            let enc: u32 = (c << 28)
+                | 0x0780_F010
+                | ((rd.value() as u32) << 16)
+                | ((rm.value() as u32) << 8)
+                | (rn.value() as u32);
             Ok(emit32(enc))
         }
         [Operand::Reg(rd), Operand::Reg(rn), Operand::Reg(rm), Operand::Reg(ra)] => {
             let c = cond_bits(inst);
-            let enc: u32 = (c << 28) | 0x0780_0010
-                | ((rd.value() as u32) << 16) | ((ra.value() as u32) << 12) | ((rm.value() as u32) << 8) | (rn.value() as u32);
+            let enc: u32 = (c << 28)
+                | 0x0780_0010
+                | ((rd.value() as u32) << 16)
+                | ((ra.value() as u32) << 12)
+                | ((rm.value() as u32) << 8)
+                | (rn.value() as u32);
             Ok(emit32(enc))
         }
         _ => Err(AsmError::new(line, "USAD8/USADA8: invalid operands")),
@@ -2010,8 +2248,11 @@ fn encode_parallel_a32(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
         [Operand::Reg(rd), Operand::Reg(rn), Operand::Reg(rm)] => {
             let c = cond_bits(inst);
             let op = parallel_opcode_a32(inst.mnemonic);
-            let enc: u32 = (c << 28) | op
-                | ((rn.value() as u32) << 16) | ((rd.value() as u32) << 12) | (rm.value() as u32);
+            let enc: u32 = (c << 28)
+                | op
+                | ((rn.value() as u32) << 16)
+                | ((rd.value() as u32) << 12)
+                | (rm.value() as u32);
             Ok(emit32(enc))
         }
         _ => Err(AsmError::new(line, "parallel arith: need Rd, Rn, Rm")),
@@ -2022,47 +2263,47 @@ fn parallel_opcode_a32(m: Mnemonic) -> u32 {
     use Mnemonic::*;
     match m {
         // Signed: 0110 0001 Rn Rd 1111 opc1 Rm
-        Sadd16  => 0x0610_0F10,
-        Sasx    => 0x0610_0F30,
-        Ssax    => 0x0610_0F50,
-        Ssub16  => 0x0610_0F70,
-        Sadd8   => 0x0610_0F90,
-        Ssub8   => 0x0610_0FF0,
+        Sadd16 => 0x0610_0F10,
+        Sasx => 0x0610_0F30,
+        Ssax => 0x0610_0F50,
+        Ssub16 => 0x0610_0F70,
+        Sadd8 => 0x0610_0F90,
+        Ssub8 => 0x0610_0FF0,
         // Saturating: 0110 0010
-        Qadd16  => 0x0620_0F10,
-        Qasx    => 0x0620_0F30,
-        Qsax    => 0x0620_0F50,
-        Qsub16  => 0x0620_0F70,
-        Qadd8   => 0x0620_0F90,
-        Qsub8   => 0x0620_0FF0,
+        Qadd16 => 0x0620_0F10,
+        Qasx => 0x0620_0F30,
+        Qsax => 0x0620_0F50,
+        Qsub16 => 0x0620_0F70,
+        Qadd8 => 0x0620_0F90,
+        Qsub8 => 0x0620_0FF0,
         // Signed halving: 0110 0011
         Shadd16 => 0x0630_0F10,
-        Shasx   => 0x0630_0F30,
-        Shsax   => 0x0630_0F50,
+        Shasx => 0x0630_0F30,
+        Shsax => 0x0630_0F50,
         Shsub16 => 0x0630_0F70,
-        Shadd8  => 0x0630_0F90,
-        Shsub8  => 0x0630_0FF0,
+        Shadd8 => 0x0630_0F90,
+        Shsub8 => 0x0630_0FF0,
         // Unsigned: 0110 0101
-        Uadd16  => 0x0650_0F10,
-        Uasx    => 0x0650_0F30,
-        Usax    => 0x0650_0F50,
-        Usub16  => 0x0650_0F70,
-        Uadd8   => 0x0650_0F90,
-        Usub8   => 0x0650_0FF0,
+        Uadd16 => 0x0650_0F10,
+        Uasx => 0x0650_0F30,
+        Usax => 0x0650_0F50,
+        Usub16 => 0x0650_0F70,
+        Uadd8 => 0x0650_0F90,
+        Usub8 => 0x0650_0FF0,
         // Unsigned saturating: 0110 0110
         Uqadd16 => 0x0660_0F10,
-        Uqasx   => 0x0660_0F30,
-        Uqsax   => 0x0660_0F50,
+        Uqasx => 0x0660_0F30,
+        Uqsax => 0x0660_0F50,
         Uqsub16 => 0x0660_0F70,
-        Uqadd8  => 0x0660_0F90,
-        Uqsub8  => 0x0660_0FF0,
+        Uqadd8 => 0x0660_0F90,
+        Uqsub8 => 0x0660_0FF0,
         // Unsigned halving: 0110 0111
         Uhadd16 => 0x0670_0F10,
-        Uhasx   => 0x0670_0F30,
-        Uhsax   => 0x0670_0F50,
+        Uhasx => 0x0670_0F30,
+        Uhsax => 0x0670_0F50,
         Uhsub16 => 0x0670_0F70,
-        Uhadd8  => 0x0670_0F90,
-        Uhsub8  => 0x0670_0FF0,
+        Uhadd8 => 0x0670_0F90,
+        Uhsub8 => 0x0670_0FF0,
         _ => panic!("not a parallel arithmetic mnemonic"),
     }
 }
@@ -2129,9 +2370,23 @@ fn encode_ldr_unpriv_a32(inst: &Instruction, load: bool, byte: bool) -> Result<V
     // Encoding: cond 01 I 0 U B 1 L Rn Rt offset12
     // P=0, W=1 for unprivileged (W=1 + P=0 = unprivileged)
     match inst.operands.as_slice() {
-        [Operand::Reg(rt), Operand::Memory { base, offset: MemOffset::Imm(imm), pre_index: false, .. }] => {
-            let (u, abs) = if *imm >= 0 { (1u32, *imm as u32) } else { (0, (-*imm) as u32) };
-            if abs > 4095 { return Err(AsmError::new(line, "unprivileged load/store: offset out of range")); }
+        [Operand::Reg(rt), Operand::Memory {
+            base,
+            offset: MemOffset::Imm(imm),
+            pre_index: false,
+            ..
+        }] => {
+            let (u, abs) = if *imm >= 0 {
+                (1u32, *imm as u32)
+            } else {
+                (0, (-*imm) as u32)
+            };
+            if abs > 4095 {
+                return Err(AsmError::new(
+                    line,
+                    "unprivileged load/store: offset out of range",
+                ));
+            }
             let c = cond_bits(inst);
             // P=0 (bit24), W=1 (bit21), I=0 (bit25=0 for immediate)
             let enc: u32 = (c << 28) | (0x04 << 24) // bits 27:26 = 01
@@ -2142,7 +2397,12 @@ fn encode_ldr_unpriv_a32(inst: &Instruction, load: bool, byte: bool) -> Result<V
             Ok(emit32(enc))
         }
         // [Rn] with no offset = [Rn], #0
-        [Operand::Reg(rt), Operand::Memory { base, offset: MemOffset::Imm(0), pre_index: true, writeback: false }] => {
+        [Operand::Reg(rt), Operand::Memory {
+            base,
+            offset: MemOffset::Imm(0),
+            pre_index: true,
+            writeback: false,
+        }] => {
             let c = cond_bits(inst);
             let enc: u32 = (c << 28) | (0x04 << 24)
                 | (1 << 23) // U=1 for +0
@@ -2152,7 +2412,12 @@ fn encode_ldr_unpriv_a32(inst: &Instruction, load: bool, byte: bool) -> Result<V
             Ok(emit32(enc))
         }
         // [Rn], Rm  (post-index register)
-        [Operand::Reg(rt), Operand::Memory { base, offset: MemOffset::Reg(rm, sub), pre_index: false, .. }] => {
+        [Operand::Reg(rt), Operand::Memory {
+            base,
+            offset: MemOffset::Reg(rm, sub),
+            pre_index: false,
+            ..
+        }] => {
             let c = cond_bits(inst);
             let u = (!*sub) as u32;
             // I=1 (bit25), P=0, W=1 for register post-index unprivileged
@@ -2164,18 +2429,31 @@ fn encode_ldr_unpriv_a32(inst: &Instruction, load: bool, byte: bool) -> Result<V
             Ok(emit32(enc))
         }
         // [Rn], Rm, shift #amt  (post-index shifted register)
-        [Operand::Reg(rt), Operand::Memory { base, offset: MemOffset::RegShift(rm, st, amt, sub), pre_index: false, .. }] => {
+        [Operand::Reg(rt), Operand::Memory {
+            base,
+            offset: MemOffset::RegShift(rm, st, amt, sub),
+            pre_index: false,
+            ..
+        }] => {
             let c = cond_bits(inst);
             let u = (!*sub) as u32;
-            let enc: u32 = (c << 28) | (0x06 << 24)
-                | (u << 23) | ((byte as u32) << 22) | (1 << 21)
+            let enc: u32 = (c << 28)
+                | (0x06 << 24)
+                | (u << 23)
+                | ((byte as u32) << 22)
+                | (1 << 21)
                 | ((load as u32) << 20)
-                | ((base.value() as u32) << 16) | ((rt.value() as u32) << 12)
-                | ((*amt as u32) << 7) | ((st.encoding() as u32) << 5)
+                | ((base.value() as u32) << 16)
+                | ((rt.value() as u32) << 12)
+                | ((*amt as u32) << 7)
+                | ((st.encoding() as u32) << 5)
                 | (rm.value() as u32);
             Ok(emit32(enc))
         }
-        _ => Err(AsmError::new(line, "unprivileged load/store: need Rt, [Rn]{, #offset}")),
+        _ => Err(AsmError::new(
+            line,
+            "unprivileged load/store: need Rt, [Rn]{, #offset}",
+        )),
     }
 }
 
@@ -2183,7 +2461,11 @@ fn encode_ldr_unpriv_a32(inst: &Instruction, load: bool, byte: bool) -> Result<V
 // Unprivileged halfword: LDRHT, STRHT, LDRSBT, LDRSHT
 // ---------------------------------------------------------------------------
 
-fn encode_ldrh_unpriv_a32(inst: &Instruction, signed: bool, half: bool) -> Result<Vec<u8>, AsmError> {
+fn encode_ldrh_unpriv_a32(
+    inst: &Instruction,
+    signed: bool,
+    half: bool,
+) -> Result<Vec<u8>, AsmError> {
     let line = inst.line;
     // cond 000 0 U 1 1 L Rn Rt imm4H 1SH1 imm4L  (P=0, W=1 for T variant)
     // Actually for A32 unprivileged halfword: P=0, W=1
@@ -2195,28 +2477,64 @@ fn encode_ldrh_unpriv_a32(inst: &Instruction, signed: bool, half: bool) -> Resul
         _ => unreachable!(),
     };
     match inst.operands.as_slice() {
-        [Operand::Reg(rt), Operand::Memory { base, offset: MemOffset::Imm(imm), pre_index: false, .. }] => {
-            let (u, abs) = if *imm >= 0 { (1u32, *imm as u32) } else { (0, (-*imm) as u32) };
-            if abs > 255 { return Err(AsmError::new(line, "halfword unpriv: offset out of range (max 255)")); }
+        [Operand::Reg(rt), Operand::Memory {
+            base,
+            offset: MemOffset::Imm(imm),
+            pre_index: false,
+            ..
+        }] => {
+            let (u, abs) = if *imm >= 0 {
+                (1u32, *imm as u32)
+            } else {
+                (0, (-*imm) as u32)
+            };
+            if abs > 255 {
+                return Err(AsmError::new(
+                    line,
+                    "halfword unpriv: offset out of range (max 255)",
+                ));
+            }
             let c = cond_bits(inst);
             // P=0 (bit24=0), W=1 (bit21=1 for T), I=1 (bit22=1 for imm8)
-            let enc: u32 = (c << 28) | (u << 23) | (1 << 22) | (1 << 21)
+            let enc: u32 = (c << 28)
+                | (u << 23)
+                | (1 << 22)
+                | (1 << 21)
                 | ((load as u32) << 20)
-                | ((base.value() as u32) << 16) | ((rt.value() as u32) << 12)
+                | ((base.value() as u32) << 16)
+                | ((rt.value() as u32) << 12)
                 | ((abs >> 4) << 8)
-                | (1 << 7) | ((signed as u32) << 6) | ((half as u32) << 5) | (1 << 4)
+                | (1 << 7)
+                | ((signed as u32) << 6)
+                | ((half as u32) << 5)
+                | (1 << 4)
                 | (abs & 0xF);
             Ok(emit32(enc))
         }
-        [Operand::Reg(rt), Operand::Memory { base, offset: MemOffset::Imm(0), pre_index: true, writeback: false }] => {
+        [Operand::Reg(rt), Operand::Memory {
+            base,
+            offset: MemOffset::Imm(0),
+            pre_index: true,
+            writeback: false,
+        }] => {
             let c = cond_bits(inst);
-            let enc: u32 = (c << 28) | (1 << 23) | (1 << 22) | (1 << 21)
+            let enc: u32 = (c << 28)
+                | (1 << 23)
+                | (1 << 22)
+                | (1 << 21)
                 | ((load as u32) << 20)
-                | ((base.value() as u32) << 16) | ((rt.value() as u32) << 12)
-                | (1 << 7) | ((signed as u32) << 6) | ((half as u32) << 5) | (1 << 4);
+                | ((base.value() as u32) << 16)
+                | ((rt.value() as u32) << 12)
+                | (1 << 7)
+                | ((signed as u32) << 6)
+                | ((half as u32) << 5)
+                | (1 << 4);
             Ok(emit32(enc))
         }
-        _ => Err(AsmError::new(line, "halfword unpriv: need Rt, [Rn], #offset")),
+        _ => Err(AsmError::new(
+            line,
+            "halfword unpriv: need Rt, [Rn], #offset",
+        )),
     }
 }
 
@@ -2229,11 +2547,20 @@ fn encode_pld_a32(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
     // PLD [Rn, #offset]: 1111 0101 U101 Rn 1111 offset12
     // PLD is unconditional (0xF prefix)
     match inst.operands.as_slice() {
-        [Operand::Memory { base, offset: MemOffset::Imm(imm), .. }] => {
-            let (u, abs) = if *imm >= 0 { (1u32, *imm as u32) } else { (0, (-*imm) as u32) };
-            if abs > 4095 { return Err(AsmError::new(line, "PLD: offset out of range")); }
-            let enc: u32 = 0xF550_F000 | (u << 23)
-                | ((base.value() as u32) << 16) | abs;
+        [Operand::Memory {
+            base,
+            offset: MemOffset::Imm(imm),
+            ..
+        }] => {
+            let (u, abs) = if *imm >= 0 {
+                (1u32, *imm as u32)
+            } else {
+                (0, (-*imm) as u32)
+            };
+            if abs > 4095 {
+                return Err(AsmError::new(line, "PLD: offset out of range"));
+            }
+            let enc: u32 = 0xF550_F000 | (u << 23) | ((base.value() as u32) << 16) | abs;
             Ok(emit32(enc))
         }
         _ => Err(AsmError::new(line, "PLD: need [Rn, #offset]")),
@@ -2248,11 +2575,20 @@ fn encode_pli_a32(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
     let line = inst.line;
     // PLI [Rn, #offset]: 1111 0100 U101 Rn 1111 offset12
     match inst.operands.as_slice() {
-        [Operand::Memory { base, offset: MemOffset::Imm(imm), .. }] => {
-            let (u, abs) = if *imm >= 0 { (1u32, *imm as u32) } else { (0, (-*imm) as u32) };
-            if abs > 4095 { return Err(AsmError::new(line, "PLI: offset out of range")); }
-            let enc: u32 = 0xF450_F000 | (u << 23)
-                | ((base.value() as u32) << 16) | abs;
+        [Operand::Memory {
+            base,
+            offset: MemOffset::Imm(imm),
+            ..
+        }] => {
+            let (u, abs) = if *imm >= 0 {
+                (1u32, *imm as u32)
+            } else {
+                (0, (-*imm) as u32)
+            };
+            if abs > 4095 {
+                return Err(AsmError::new(line, "PLI: offset out of range"));
+            }
+            let enc: u32 = 0xF450_F000 | (u << 23) | ((base.value() as u32) << 16) | abs;
             Ok(emit32(enc))
         }
         _ => Err(AsmError::new(line, "PLI: need [Rn, #offset]")),
@@ -2268,7 +2604,11 @@ fn encode_cps_a32(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
     // CPSIE/CPSID takes interrupt flags as identifiers (i, f, a, or combinations)
     // CPSIE if -> 1111 0001 0000 1000 0000 0000 1100 0000 = F1080 0C0
     // CPSID if -> 1111 0001 0000 1100 0000 0000 1100 0000 = F10C00C0
-    let imod = if inst.mnemonic == Mnemonic::Cpsie { 0b10u32 } else { 0b11u32 };
+    let imod = if inst.mnemonic == Mnemonic::Cpsie {
+        0b10u32
+    } else {
+        0b11u32
+    };
 
     // Parse flag operand - it's parsed as an identifier like "if", "i", "f", "a", "aif"
     let flags_val = match inst.operands.as_slice() {
@@ -2299,23 +2639,26 @@ fn encode_cps_a32(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
 fn encode_barrier_a32(inst: &Instruction, base: u32) -> Result<Vec<u8>, AsmError> {
     let option = match inst.operands.as_slice() {
         [] => 0xF, // default SY
-        [Operand::Label(s)] => {
-            match s.to_ascii_uppercase().as_str() {
-                "SY" => 0xF,
-                "ST" => 0xE,
-                "LD" => 0xD,
-                "ISH" => 0xB,
-                "ISHST" => 0xA,
-                "ISHLD" => 0x9,
-                "NSH" => 0x7,
-                "NSHST" => 0x6,
-                "NSHLD" => 0x5,
-                "OSH" => 0x3,
-                "OSHST" => 0x2,
-                "OSHLD" => 0x1,
-                _ => return Err(AsmError::new(inst.line, format!("unknown barrier option: {s}"))),
+        [Operand::Label(s)] => match s.to_ascii_uppercase().as_str() {
+            "SY" => 0xF,
+            "ST" => 0xE,
+            "LD" => 0xD,
+            "ISH" => 0xB,
+            "ISHST" => 0xA,
+            "ISHLD" => 0x9,
+            "NSH" => 0x7,
+            "NSHST" => 0x6,
+            "NSHLD" => 0x5,
+            "OSH" => 0x3,
+            "OSHST" => 0x2,
+            "OSHLD" => 0x1,
+            _ => {
+                return Err(AsmError::new(
+                    inst.line,
+                    format!("unknown barrier option: {s}"),
+                ))
             }
-        }
+        },
         [Operand::Imm(n)] => (*n as u32) & 0xF,
         _ => return Err(AsmError::new(inst.line, "barrier: need option")),
     };

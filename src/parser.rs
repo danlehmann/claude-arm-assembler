@@ -185,7 +185,10 @@ impl<'a> Parser<'a> {
                 if syntax.to_ascii_lowercase() == "unified" {
                     Ok(Directive::SyntaxUnified)
                 } else {
-                    Err(AsmError::new(self.line(), "only .syntax unified is supported"))
+                    Err(AsmError::new(
+                        self.line(),
+                        "only .syntax unified is supported",
+                    ))
                 }
             }
             ".equ" | ".set" => {
@@ -200,8 +203,8 @@ impl<'a> Parser<'a> {
                 let ty = self.parse_ident()?;
                 Ok(Directive::Type(name, ty))
             }
-            ".thumb_func" | ".fnstart" | ".fnend" | ".cantunwind"
-            | ".size" | ".ident" | ".file" => {
+            ".thumb_func" | ".fnstart" | ".fnend" | ".cantunwind" | ".size" | ".ident"
+            | ".file" => {
                 // Skip to end of line (ignore these directives)
                 while !self.at_end_of_statement() {
                     self.advance();
@@ -243,8 +246,9 @@ impl<'a> Parser<'a> {
                 TokenKind::Ident(s) => s.to_ascii_uppercase(),
                 _ => return Err(AsmError::new(line, "IT: expected condition code")),
             };
-            let cond = Condition::from_str(&cond_str)
-                .ok_or_else(|| AsmError::new(line, format!("IT: unknown condition '{cond_str}'")))?;
+            let cond = Condition::from_str(&cond_str).ok_or_else(|| {
+                AsmError::new(line, format!("IT: unknown condition '{cond_str}'"))
+            })?;
 
             let firstcond = cond.raw_value().value();
             let n = it_pattern.len();
@@ -277,15 +281,29 @@ impl<'a> Parser<'a> {
             let rd = self.parse_reg()?;
             self.expect(&TokenKind::Comma)?;
             let sysm = self.parse_sysreg()?;
-            return Ok(Instruction { mnemonic, condition, set_flags, wide, writeback: false,
-                operands: vec![Operand::Reg(rd), Operand::SysReg(sysm)], line });
+            return Ok(Instruction {
+                mnemonic,
+                condition,
+                set_flags,
+                wide,
+                writeback: false,
+                operands: vec![Operand::Reg(rd), Operand::SysReg(sysm)],
+                line,
+            });
         }
         if mnemonic == Mnemonic::Msr {
             let sysm = self.parse_sysreg()?;
             self.expect(&TokenKind::Comma)?;
             let rn = self.parse_reg()?;
-            return Ok(Instruction { mnemonic, condition, set_flags, wide, writeback: false,
-                operands: vec![Operand::SysReg(sysm), Operand::Reg(rn)], line });
+            return Ok(Instruction {
+                mnemonic,
+                condition,
+                set_flags,
+                wide,
+                writeback: false,
+                operands: vec![Operand::SysReg(sysm), Operand::Reg(rn)],
+                line,
+            });
         }
 
         let mut operands = Vec::new();
@@ -347,17 +365,31 @@ impl<'a> Parser<'a> {
             "LSR" => ShiftType::Lsr,
             "ASR" => ShiftType::Asr,
             "ROR" => ShiftType::Ror,
-            "RRX" => return Ok(Operand::Shifted(reg, ShiftType::Rrx, Box::new(Operand::Imm(0)))),
+            "RRX" => {
+                return Ok(Operand::Shifted(
+                    reg,
+                    ShiftType::Rrx,
+                    Box::new(Operand::Imm(0)),
+                ))
+            }
             _ => return Err(AsmError::new(self.line(), "unknown shift type")),
         };
 
         // Parse shift amount: #imm or register
         if self.eat(&TokenKind::Hash) {
             let amount = self.parse_expr()?;
-            Ok(Operand::Shifted(reg, shift_type, Box::new(Operand::Imm(amount))))
+            Ok(Operand::Shifted(
+                reg,
+                shift_type,
+                Box::new(Operand::Imm(amount)),
+            ))
         } else {
             let amount_reg = self.parse_reg()?;
-            Ok(Operand::Shifted(reg, shift_type, Box::new(Operand::Reg(amount_reg))))
+            Ok(Operand::Shifted(
+                reg,
+                shift_type,
+                Box::new(Operand::Reg(amount_reg)),
+            ))
         }
     }
 
@@ -390,7 +422,10 @@ impl<'a> Parser<'a> {
                 self.advance();
                 Ok(Operand::Imm(n))
             }
-            _ => Err(AsmError::new(self.line(), format!("unexpected token in operand: {:?}", self.peek_kind()))),
+            _ => Err(AsmError::new(
+                self.line(),
+                format!("unexpected token in operand: {:?}", self.peek_kind()),
+            )),
         }
     }
 
@@ -602,7 +637,12 @@ impl<'a> Parser<'a> {
             "BASEPRI_MAX" => 18,
             "FAULTMASK" => 19,
             "CONTROL" => 20,
-            _ => return Err(AsmError::new(self.line(), format!("unknown system register: {name}"))),
+            _ => {
+                return Err(AsmError::new(
+                    self.line(),
+                    format!("unknown system register: {name}"),
+                ))
+            }
         };
         Ok(code)
     }

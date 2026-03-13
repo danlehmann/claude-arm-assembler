@@ -44,7 +44,10 @@ pub fn tokenize(input: &str) -> Result<Vec<Token>, AsmError> {
         // Newline
         if ch == '\n' {
             // Collapse multiple newlines and don't emit if last token was newline
-            if tokens.last().map_or(true, |t: &Token| t.kind != TokenKind::Newline) {
+            if tokens
+                .last()
+                .map_or(true, |t: &Token| t.kind != TokenKind::Newline)
+            {
                 tokens.push(Token {
                     kind: TokenKind::Newline,
                     line,
@@ -152,8 +155,9 @@ pub fn tokenize(input: &str) -> Result<Vec<Token>, AsmError> {
                         i += 1;
                     }
                     let s: String = chars[start + 2..i].iter().collect();
-                    let val = i64::from_str_radix(&s, 2)
-                        .map_err(|_| AsmError::new(line, format!("invalid binary literal: 0b{s}")))?;
+                    let val = i64::from_str_radix(&s, 2).map_err(|_| {
+                        AsmError::new(line, format!("invalid binary literal: 0b{s}"))
+                    })?;
                     tokens.push(Token {
                         kind: TokenKind::Number(val),
                         line,

@@ -85,7 +85,10 @@ fn pass1(stmts: &[Statement], state: &mut AsmState) -> Result<(), AsmError> {
             Statement::Label(name, _line) => {
                 state.symbols.insert(
                     name.clone(),
-                    (state.current_section, state.sections[state.current_section].offset),
+                    (
+                        state.current_section,
+                        state.sections[state.current_section].offset,
+                    ),
                 );
             }
             Statement::Instruction(inst) => {
@@ -106,7 +109,8 @@ fn pass2(stmts: &[Statement], state: &mut AsmState) -> Result<(), AsmError> {
             Statement::Label(_, _) => {}
             Statement::Instruction(inst) => {
                 let offset = state.sections[state.current_section].offset;
-                let bytes = encode_instruction(inst, state.isa, offset, &state.symbols, &state.equs)?;
+                let bytes =
+                    encode_instruction(inst, state.isa, offset, &state.symbols, &state.equs)?;
                 debug_assert_eq!(
                     bytes.len() as u32,
                     instruction_size(inst, state.isa),

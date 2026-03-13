@@ -6,7 +6,10 @@ fn main() {
     let args: Vec<String> = std::env::args().collect();
 
     if args.len() < 3 {
-        eprintln!("Usage: {} <input.s> -o <output.bin> [--isa thumb|a32]", args[0]);
+        eprintln!(
+            "Usage: {} <input.s> -o <output.bin> [--isa thumb|a32]",
+            args[0]
+        );
         process::exit(1);
     }
 

@@ -46,7 +46,13 @@ fn gnu_assemble(source: &str, cpu: &str) -> Vec<u8> {
 fn check_thumb(source: &str, cpu: &str) {
     let full_source = format!(".syntax unified\n.thumb\n{source}\n");
     let expected = gnu_assemble(&full_source, cpu);
-    let output = assemble(&full_source, &AsmConfig { default_isa: Isa::Thumb }).unwrap();
+    let output = assemble(
+        &full_source,
+        &AsmConfig {
+            default_isa: Isa::Thumb,
+        },
+    )
+    .unwrap();
     let actual = output.text_bytes();
     assert_eq!(
         actual, &expected[..],
@@ -57,7 +63,13 @@ fn check_thumb(source: &str, cpu: &str) {
 fn check_a32(source: &str, cpu: &str) {
     let full_source = format!(".syntax unified\n.arm\n{source}\n");
     let expected = gnu_assemble(&full_source, cpu);
-    let output = assemble(&full_source, &AsmConfig { default_isa: Isa::A32 }).unwrap();
+    let output = assemble(
+        &full_source,
+        &AsmConfig {
+            default_isa: Isa::A32,
+        },
+    )
+    .unwrap();
     let actual = output.text_bytes();
     assert_eq!(
         actual, &expected[..],
@@ -685,7 +697,10 @@ fn thumb2_cbz_cbnz() {
 fn thumb2_it_block() {
     check_thumb("it eq\nmoveq r0, r1", "cortex-m4");
     check_thumb("ite ne\nmovne r3, r5\nmoveq r3, r7", "cortex-m4");
-    check_thumb("itte ge\nmovge r4, r5\nmovge r6, r7\nmovlt r8, r9", "cortex-m4");
+    check_thumb(
+        "itte ge\nmovge r4, r5\nmovge r6, r7\nmovlt r8, r9",
+        "cortex-m4",
+    );
 }
 
 #[test]
@@ -903,9 +918,9 @@ fn thumb2_high_reg_ops() {
 #[test]
 fn thumb2_modified_imm_patterns() {
     // Test different modified immediate encoding patterns
-    check_thumb("mov.w r5, #0x00FF00FF", "cortex-m4");  // pattern 01: 0x00XY00XY
-    check_thumb("mov.w r8, #0xFF00FF00", "cortex-m4");  // pattern 10: 0xXY00XY00
-    check_thumb("mov.w r3, #0xFFFFFFFF", "cortex-m4");  // pattern 11: 0xXYXYXYXY
+    check_thumb("mov.w r5, #0x00FF00FF", "cortex-m4"); // pattern 01: 0x00XY00XY
+    check_thumb("mov.w r8, #0xFF00FF00", "cortex-m4"); // pattern 10: 0xXY00XY00
+    check_thumb("mov.w r3, #0xFFFFFFFF", "cortex-m4"); // pattern 11: 0xXYXYXYXY
     check_thumb("mov.w r10, #0x1F000000", "cortex-m4"); // rotated byte
 }
 
@@ -1653,7 +1668,9 @@ fn a32_regs_2op_test() {
 
 #[test]
 fn a32_regs_3op_dp() {
-    for mn in ["add", "sub", "and", "orr", "eor", "bic", "adc", "sbc", "rsb", "rsc"] {
+    for mn in [
+        "add", "sub", "and", "orr", "eor", "bic", "adc", "sbc", "rsb", "rsc",
+    ] {
         test_3_args(TEST_REGS, |rd, rn_reg, rm| {
             check_a32(
                 &format!("{mn} {}, {}, {}", rn(rd), rn(rn_reg), rn(rm)),
@@ -1714,11 +1731,10 @@ fn a32_regs_3op_div() {
 #[test]
 fn a32_regs_3op_parallel() {
     for mn in [
-        "sadd16", "sadd8", "ssub16", "ssub8", "uadd16", "uadd8", "usub16", "usub8",
-        "qadd16", "qadd8", "qsub16", "qsub8", "shadd16", "shadd8", "shsub16", "shsub8",
-        "uhadd16", "uhadd8", "uhsub16", "uhsub8", "uqadd16", "uqadd8", "uqsub16", "uqsub8",
-        "sasx", "ssax", "uasx", "usax", "qasx", "qsax",
-        "shasx", "shsax", "uhasx", "uhsax", "uqasx", "uqsax",
+        "sadd16", "sadd8", "ssub16", "ssub8", "uadd16", "uadd8", "usub16", "usub8", "qadd16",
+        "qadd8", "qsub16", "qsub8", "shadd16", "shadd8", "shsub16", "shsub8", "uhadd16", "uhadd8",
+        "uhsub16", "uhsub8", "uqadd16", "uqadd8", "uqsub16", "uqsub8", "sasx", "ssax", "uasx",
+        "usax", "qasx", "qsax", "shasx", "shsax", "uhasx", "uhsax", "uqasx", "uqsax",
     ] {
         test_3_args(TEST_REGS, |rd, rn_reg, rm| {
             check_a32(
@@ -1768,8 +1784,8 @@ fn a32_regs_3op_packing() {
 #[test]
 fn a32_regs_4op_mla() {
     for mn in [
-        "mla", "mls", "smmla", "smmls", "smlad", "smlsd", "usada8",
-        "smlabb", "smlabt", "smlatb", "smlatt",
+        "mla", "mls", "smmla", "smmls", "smlad", "smlsd", "usada8", "smlabb", "smlabt", "smlatb",
+        "smlatt",
     ] {
         test_4_args(TEST_REGS_4OP, |rd, rn_reg, rm, ra| {
             check_a32(
@@ -1783,12 +1799,18 @@ fn a32_regs_4op_mla() {
 #[test]
 fn a32_regs_4op_long_mul() {
     for mn in [
-        "umull", "smull", "umlal", "smlal",
-        "smlalbb", "smlalbt", "smlaltb", "smlaltt", "smlald", "smlsld",
+        "umull", "smull", "umlal", "smlal", "smlalbb", "smlalbt", "smlaltb", "smlaltt", "smlald",
+        "smlsld",
     ] {
         test_4_args(TEST_REGS_4OP, |rdlo, rdhi, rn_reg, rm| {
             check_a32(
-                &format!("{mn} {}, {}, {}, {}", rn(rdlo), rn(rdhi), rn(rn_reg), rn(rm)),
+                &format!(
+                    "{mn} {}, {}, {}, {}",
+                    rn(rdlo),
+                    rn(rdhi),
+                    rn(rn_reg),
+                    rn(rm)
+                ),
                 "cortex-a7",
             );
         });
@@ -1917,11 +1939,10 @@ fn thumb_regs_3op_div() {
 #[test]
 fn thumb_regs_3op_parallel() {
     for mn in [
-        "sadd16", "sadd8", "ssub16", "ssub8", "uadd16", "uadd8", "usub16", "usub8",
-        "qadd16", "qadd8", "qsub16", "qsub8", "shadd16", "shadd8", "shsub16", "shsub8",
-        "uhadd16", "uhadd8", "uhsub16", "uhsub8", "uqadd16", "uqadd8", "uqsub16", "uqsub8",
-        "sasx", "ssax", "uasx", "usax", "qasx", "qsax",
-        "shasx", "shsax", "uhasx", "uhsax", "uqasx", "uqsax",
+        "sadd16", "sadd8", "ssub16", "ssub8", "uadd16", "uadd8", "usub16", "usub8", "qadd16",
+        "qadd8", "qsub16", "qsub8", "shadd16", "shadd8", "shsub16", "shsub8", "uhadd16", "uhadd8",
+        "uhsub16", "uhsub8", "uqadd16", "uqadd8", "uqsub16", "uqsub8", "sasx", "ssax", "uasx",
+        "usax", "qasx", "qsax", "shasx", "shsax", "uhasx", "uhsax", "uqasx", "uqsax",
     ] {
         test_3_args(TEST_REGS, |rd, rn_reg, rm| {
             check_thumb(
@@ -1980,8 +2001,8 @@ fn thumb_regs_2op_clz_rbit() {
 #[test]
 fn thumb_regs_4op_mla() {
     for mn in [
-        "mla", "mls", "smmla", "smmls", "smlad", "smlsd", "usada8",
-        "smlabb", "smlabt", "smlatb", "smlatt",
+        "mla", "mls", "smmla", "smmls", "smlad", "smlsd", "usada8", "smlabb", "smlabt", "smlatb",
+        "smlatt",
     ] {
         test_4_args(TEST_REGS_4OP, |rd, rn_reg, rm, ra| {
             check_thumb(
@@ -1995,12 +2016,18 @@ fn thumb_regs_4op_mla() {
 #[test]
 fn thumb_regs_4op_long_mul() {
     for mn in [
-        "umull", "smull", "umlal", "smlal",
-        "smlalbb", "smlalbt", "smlaltb", "smlaltt", "smlald", "smlsld",
+        "umull", "smull", "umlal", "smlal", "smlalbb", "smlalbt", "smlaltb", "smlaltt", "smlald",
+        "smlsld",
     ] {
         test_4_args(TEST_REGS_4OP, |rdlo, rdhi, rn_reg, rm| {
             check_thumb(
-                &format!("{mn} {}, {}, {}, {}", rn(rdlo), rn(rdhi), rn(rn_reg), rn(rm)),
+                &format!(
+                    "{mn} {}, {}, {}, {}",
+                    rn(rdlo),
+                    rn(rdhi),
+                    rn(rn_reg),
+                    rn(rm)
+                ),
                 "cortex-m4",
             );
         });
