@@ -7,6 +7,7 @@ use crate::ast::*;
 use crate::error::AsmError;
 
 use super::resolve_label;
+use super::EncodedInst;
 
 // ---------------------------------------------------------------------------
 // Bitfield structs for Thumb 16-bit instruction formats
@@ -540,11 +541,8 @@ struct T2BitFieldHw2 {
 // ---------------------------------------------------------------------------
 
 /// Emit a 32-bit Thumb-2 instruction as two little-endian halfwords.
-fn emit32_thumb(hw1: u16, hw2: u16) -> Vec<u8> {
-    let mut v = Vec::with_capacity(4);
-    v.extend_from_slice(&hw1.to_le_bytes());
-    v.extend_from_slice(&hw2.to_le_bytes());
-    v
+fn emit32_thumb(hw1: u16, hw2: u16) -> EncodedInst {
+    EncodedInst::W32((hw2 as u32) << 16 | hw1 as u32)
 }
 
 /// Encode a 32-bit value into the Thumb modified immediate constant (12-bit encoding).
@@ -811,7 +809,7 @@ pub fn encode_thumb(
     offset: u32,
     symbols: &HashMap<String, (usize, u32)>,
     equs: &HashMap<String, i64>,
-) -> Result<Vec<u8>, AsmError> {
+) -> Result<EncodedInst, AsmError> {
     use Mnemonic::*;
 
     // Always-wide Thumb-2 instructions dispatch directly
@@ -848,13 +846,13 @@ pub fn encode_thumb(
         Bl => encode_bl(inst, offset, symbols, equs),
         Bx => encode_bx(inst),
         Blx => encode_blx(inst),
-        Nop => Ok(0xBF00u16.to_le_bytes().to_vec()),
+        Nop => Ok(emit16(0xBF00)),
         Svc => encode_svc(inst),
         Adr => encode_adr(inst, offset, symbols, equs),
         Rev | Rev16 | Revsh | Sxth | Sxtb | Uxth | Uxtb => encode_misc_thumb(inst),
-        Wfi => Ok(0xBF30u16.to_le_bytes().to_vec()),
-        Wfe => Ok(0xBF20u16.to_le_bytes().to_vec()),
-        Sev => Ok(0xBF40u16.to_le_bytes().to_vec()),
+        Wfi => Ok(emit16(0xBF30)),
+        Wfe => Ok(emit16(0xBF20)),
+        Sev => Ok(emit16(0xBF40)),
         Bkpt => encode_bkpt(inst),
         Cbz => encode_cbz_cbnz(inst, offset, symbols, equs),
         Cbnz => encode_cbz_cbnz(inst, offset, symbols, equs),
@@ -1021,7 +1019,7 @@ fn encode_thumb_wide(
     offset: u32,
     symbols: &HashMap<String, (usize, u32)>,
     equs: &HashMap<String, i64>,
-) -> Result<Vec<u8>, AsmError> {
+) -> Result<EncodedInst, AsmError> {
     use Mnemonic::*;
     match inst.mnemonic {
         // Data processing (wide)
@@ -1111,8 +1109,8 @@ fn encode_thumb_wide(
 // Helpers
 // ---------------------------------------------------------------------------
 
-fn emit16(hw: u16) -> Vec<u8> {
-    hw.to_le_bytes().to_vec()
+fn emit16(hw: u16) -> EncodedInst {
+    EncodedInst::W16(hw)
 }
 
 /// Convert a low register (R0-R7) to u3 for narrow Thumb encodings.
@@ -1147,7 +1145,7 @@ fn imm_u8(val: i64, line: usize) -> Result<u8, AsmError> {
 // Individual encoders
 // ---------------------------------------------------------------------------
 
-fn encode_mov(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
+fn encode_mov(inst: &Instruction) -> Result<EncodedInst, AsmError> {
     let line = inst.line;
     match inst.operands.as_slice() {
         // MOVS Rd, #imm8 (Rd low) -- narrow only when S flag set or inside IT block
@@ -1190,7 +1188,7 @@ fn encode_add(
     offset: u32,
     symbols: &HashMap<String, (usize, u32)>,
     equs: &HashMap<String, i64>,
-) -> Result<Vec<u8>, AsmError> {
+) -> Result<EncodedInst, AsmError> {
     let line = inst.line;
     match inst.operands.as_slice() {
         // ADD Rd, SP, #imm8 (Format 12)
@@ -1302,7 +1300,7 @@ fn encode_add(
     }
 }
 
-fn encode_sub(inst: &Instruction, _offset: u32) -> Result<Vec<u8>, AsmError> {
+fn encode_sub(inst: &Instruction, _offset: u32) -> Result<EncodedInst, AsmError> {
     let line = inst.line;
     match inst.operands.as_slice() {
         // SUB SP, SP, #imm7 (Format 13)
@@ -1374,7 +1372,7 @@ fn encode_sub(inst: &Instruction, _offset: u32) -> Result<Vec<u8>, AsmError> {
     }
 }
 
-fn encode_cmp(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
+fn encode_cmp(inst: &Instruction) -> Result<EncodedInst, AsmError> {
     let line = inst.line;
     match inst.operands.as_slice() {
         // CMP Rn, #imm8 (Format 3)
@@ -1411,7 +1409,7 @@ fn encode_cmp(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
     }
 }
 
-fn encode_alu(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
+fn encode_alu(inst: &Instruction) -> Result<EncodedInst, AsmError> {
     let line = inst.line;
     let (rd, rm) = match inst.operands.as_slice() {
         [Operand::Reg(rd), Operand::Reg(rm)] => (*rd, *rm),
@@ -1449,7 +1447,7 @@ fn encode_alu(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
     Ok(emit16(hw.raw_value()))
 }
 
-fn encode_shift(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
+fn encode_shift(inst: &Instruction) -> Result<EncodedInst, AsmError> {
     let line = inst.line;
     let op = match inst.mnemonic {
         Mnemonic::Lsl => 0b00u8,
@@ -1511,7 +1509,7 @@ fn encode_ldr(
     offset: u32,
     symbols: &HashMap<String, (usize, u32)>,
     equs: &HashMap<String, i64>,
-) -> Result<Vec<u8>, AsmError> {
+) -> Result<EncodedInst, AsmError> {
     let line = inst.line;
     match inst.operands.as_slice() {
         // LDR Rt, [Rn, #imm] (word, Format 9)
@@ -1593,7 +1591,7 @@ fn encode_ldr(
     }
 }
 
-fn encode_str(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
+fn encode_str(inst: &Instruction) -> Result<EncodedInst, AsmError> {
     let line = inst.line;
     match inst.operands.as_slice() {
         // STR Rt, [Rn, #imm] (word, Format 9)
@@ -1656,7 +1654,7 @@ fn encode_str(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
     }
 }
 
-fn encode_ldrb(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
+fn encode_ldrb(inst: &Instruction) -> Result<EncodedInst, AsmError> {
     let line = inst.line;
     match inst.operands.as_slice() {
         [Operand::Reg(rt), Operand::Memory {
@@ -1694,7 +1692,7 @@ fn encode_ldrb(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
     }
 }
 
-fn encode_strb(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
+fn encode_strb(inst: &Instruction) -> Result<EncodedInst, AsmError> {
     let line = inst.line;
     match inst.operands.as_slice() {
         [Operand::Reg(rt), Operand::Memory {
@@ -1731,7 +1729,7 @@ fn encode_strb(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
     }
 }
 
-fn encode_ldrh(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
+fn encode_ldrh(inst: &Instruction) -> Result<EncodedInst, AsmError> {
     let line = inst.line;
     match inst.operands.as_slice() {
         [Operand::Reg(rt), Operand::Memory {
@@ -1771,7 +1769,7 @@ fn encode_ldrh(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
     }
 }
 
-fn encode_strh(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
+fn encode_strh(inst: &Instruction) -> Result<EncodedInst, AsmError> {
     let line = inst.line;
     match inst.operands.as_slice() {
         [Operand::Reg(rt), Operand::Memory {
@@ -1810,7 +1808,7 @@ fn encode_strh(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
     }
 }
 
-fn encode_push(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
+fn encode_push(inst: &Instruction) -> Result<EncodedInst, AsmError> {
     let line = inst.line;
     match inst.operands.as_slice() {
         [Operand::RegList(mask)] => {
@@ -1830,7 +1828,7 @@ fn encode_push(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
     }
 }
 
-fn encode_pop(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
+fn encode_pop(inst: &Instruction) -> Result<EncodedInst, AsmError> {
     let line = inst.line;
     match inst.operands.as_slice() {
         [Operand::RegList(mask)] => {
@@ -1856,7 +1854,7 @@ fn encode_branch(
     offset: u32,
     symbols: &HashMap<String, (usize, u32)>,
     equs: &HashMap<String, i64>,
-) -> Result<Vec<u8>, AsmError> {
+) -> Result<EncodedInst, AsmError> {
     let line = inst.line;
     let target_label = match inst.operands.as_slice() {
         [Operand::Label(name)] => name,
@@ -1909,7 +1907,7 @@ fn encode_bl(
     offset: u32,
     symbols: &HashMap<String, (usize, u32)>,
     equs: &HashMap<String, i64>,
-) -> Result<Vec<u8>, AsmError> {
+) -> Result<EncodedInst, AsmError> {
     let line = inst.line;
     let target_label = match inst.operands.as_slice() {
         [Operand::Label(name)] => name,
@@ -1952,7 +1950,7 @@ fn encode_bl(
     Ok(emit32_thumb(hw1.raw_value(), hw2_val))
 }
 
-fn encode_bx(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
+fn encode_bx(inst: &Instruction) -> Result<EncodedInst, AsmError> {
     let line = inst.line;
     match inst.operands.as_slice() {
         [Operand::Reg(rm)] => {
@@ -1966,7 +1964,7 @@ fn encode_bx(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
     }
 }
 
-fn encode_blx(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
+fn encode_blx(inst: &Instruction) -> Result<EncodedInst, AsmError> {
     let line = inst.line;
     match inst.operands.as_slice() {
         [Operand::Reg(rm)] => {
@@ -1981,7 +1979,7 @@ fn encode_blx(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
     }
 }
 
-fn encode_svc(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
+fn encode_svc(inst: &Instruction) -> Result<EncodedInst, AsmError> {
     let line = inst.line;
     match inst.operands.as_slice() {
         [Operand::Imm(imm)] => {
@@ -1999,7 +1997,7 @@ fn encode_adr(
     offset: u32,
     symbols: &HashMap<String, (usize, u32)>,
     equs: &HashMap<String, i64>,
-) -> Result<Vec<u8>, AsmError> {
+) -> Result<EncodedInst, AsmError> {
     let line = inst.line;
     match inst.operands.as_slice() {
         [Operand::Reg(rd), Operand::Label(name)] if rd.value() <= 7 => {
@@ -2022,7 +2020,7 @@ fn encode_adr(
     }
 }
 
-fn encode_bkpt(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
+fn encode_bkpt(inst: &Instruction) -> Result<EncodedInst, AsmError> {
     let line = inst.line;
     match inst.operands.as_slice() {
         [Operand::Imm(imm)] => {
@@ -2034,7 +2032,7 @@ fn encode_bkpt(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
     }
 }
 
-fn encode_barrier_thumb(inst: &Instruction, barrier_op: u4) -> Result<Vec<u8>, AsmError> {
+fn encode_barrier_thumb(inst: &Instruction, barrier_op: u4) -> Result<EncodedInst, AsmError> {
     let option: u16 = match inst.operands.as_slice() {
         [] => 0xF, // default SY
         [Operand::Label(s)] => match s.to_ascii_uppercase().as_str() {
@@ -2070,7 +2068,7 @@ fn encode_barrier_thumb(inst: &Instruction, barrier_op: u4) -> Result<Vec<u8>, A
     Ok(emit32_thumb(hw1.raw_value(), hw2.raw_value()))
 }
 
-fn encode_misc_thumb(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
+fn encode_misc_thumb(inst: &Instruction) -> Result<EncodedInst, AsmError> {
     let line = inst.line;
     let (rd, rm) = match inst.operands.as_slice() {
         [Operand::Reg(rd), Operand::Reg(rm)] => (*rd, *rm),
@@ -2103,7 +2101,7 @@ fn encode_cbz_cbnz(
     offset: u32,
     symbols: &HashMap<String, (usize, u32)>,
     equs: &HashMap<String, i64>,
-) -> Result<Vec<u8>, AsmError> {
+) -> Result<EncodedInst, AsmError> {
     let line = inst.line;
     let (rn, label) = match inst.operands.as_slice() {
         [Operand::Reg(rn), Operand::Label(name)] => (*rn, name),
@@ -2133,7 +2131,7 @@ fn encode_cbz_cbnz(
     Ok(emit16(hw.raw_value()))
 }
 
-fn encode_it(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
+fn encode_it(inst: &Instruction) -> Result<EncodedInst, AsmError> {
     let line = inst.line;
     let mask = match inst.operands.as_slice() {
         [Operand::Imm(m)] => *m as u8,
@@ -2149,7 +2147,7 @@ fn encode_it(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
     Ok(emit16(hw.raw_value()))
 }
 
-fn encode_ldm_narrow(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
+fn encode_ldm_narrow(inst: &Instruction) -> Result<EncodedInst, AsmError> {
     let line = inst.line;
     match inst.operands.as_slice() {
         // LDMIA SP!, {R0-R7, PC} → narrow POP
@@ -2178,7 +2176,7 @@ fn encode_ldm_narrow(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
     }
 }
 
-fn encode_stm_narrow(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
+fn encode_stm_narrow(inst: &Instruction) -> Result<EncodedInst, AsmError> {
     let line = inst.line;
     match inst.operands.as_slice() {
         [Operand::Reg(rn), Operand::RegList(mask)] if rn.value() <= 7 && (*mask & 0xFF00) == 0 => {
@@ -2204,7 +2202,7 @@ fn encode_stm_narrow(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
 // Data processing (modified immediate + shifted register)
 // ---------------------------------------------------------------------------
 
-fn encode_t2_data_proc(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
+fn encode_t2_data_proc(inst: &Instruction) -> Result<EncodedInst, AsmError> {
     let line = inst.line;
     let m = inst.mnemonic;
     let is_test = m.implicit_s();
@@ -2290,7 +2288,7 @@ fn shift_encoding(st: ShiftType, amount: &Operand, line: usize) -> Result<(u8, u
 }
 
 /// Encode Thumb-2 DP modified immediate: 11110 i 0 op S Rn | 0 imm3 Rd imm8
-fn t2_dp_mod_imm(opcode: u8, s: bool, rn: u4, rd: u4, imm12: u16) -> Vec<u8> {
+fn t2_dp_mod_imm(opcode: u8, s: bool, rn: u4, rd: u4, imm12: u16) -> EncodedInst {
     let hw1 = T2DpModImmHw1::ZERO
         .with_prefix(u5::new(0b11110))
         .with_i(((imm12 >> 11) & 1) != 0)
@@ -2305,7 +2303,15 @@ fn t2_dp_mod_imm(opcode: u8, s: bool, rn: u4, rd: u4, imm12: u16) -> Vec<u8> {
 }
 
 /// Encode Thumb-2 DP shifted register: 1110101 op S Rn | 0 imm3 Rd imm2 type Rm
-fn t2_dp_shift_reg(opcode: u8, s: bool, rn: u4, rd: u4, rm: u4, stype: u8, simm: u8) -> Vec<u8> {
+fn t2_dp_shift_reg(
+    opcode: u8,
+    s: bool,
+    rn: u4,
+    rd: u4,
+    rm: u4,
+    stype: u8,
+    simm: u8,
+) -> EncodedInst {
     let hw1 = T2DpShiftRegHw1::ZERO
         .with_prefix(u7::new(0b1110101))
         .with_opcode(u4::new(opcode))
@@ -2324,7 +2330,7 @@ fn t2_dp_shift_reg(opcode: u8, s: bool, rn: u4, rd: u4, rm: u4, stype: u8, simm:
 // MOVW / MOVT (16-bit immediate)
 // ---------------------------------------------------------------------------
 
-fn encode_t2_movw_movt(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
+fn encode_t2_movw_movt(inst: &Instruction) -> Result<EncodedInst, AsmError> {
     let line = inst.line;
     let (rd, imm) = match inst.operands.as_slice() {
         [Operand::Reg(rd), Operand::Imm(imm)] => (*rd, *imm as u32),
@@ -2355,7 +2361,7 @@ fn encode_t2_movw_movt(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
 // Shifts (wide)
 // ---------------------------------------------------------------------------
 
-fn encode_t2_shift(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
+fn encode_t2_shift(inst: &Instruction) -> Result<EncodedInst, AsmError> {
     let line = inst.line;
     let stype: u8 = match inst.mnemonic {
         Mnemonic::Lsl => 0b00,
@@ -2408,7 +2414,7 @@ fn encode_t2_shift(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
 // Multiply / divide (wide)
 // ---------------------------------------------------------------------------
 
-fn encode_t2_mul(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
+fn encode_t2_mul(inst: &Instruction) -> Result<EncodedInst, AsmError> {
     let line = inst.line;
     match inst.operands.as_slice() {
         // MUL Rd, Rn, Rm: 11111011 0000 Rn | 1111 Rd 0000 Rm
@@ -2449,7 +2455,7 @@ fn encode_t2_mul(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
     }
 }
 
-fn encode_t2_long_mul(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
+fn encode_t2_long_mul(inst: &Instruction) -> Result<EncodedInst, AsmError> {
     let line = inst.line;
     // UMULL/SMULL/UMLAL/SMLAL RdLo, RdHi, Rn, Rm
     let (rdlo, rdhi, rn, rm) = match inst.operands.as_slice() {
@@ -2475,7 +2481,7 @@ fn encode_t2_long_mul(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
     Ok(emit32_thumb(hw1.raw_value(), hw2.raw_value()))
 }
 
-fn encode_t2_div(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
+fn encode_t2_div(inst: &Instruction) -> Result<EncodedInst, AsmError> {
     let line = inst.line;
     let (rd, rn, rm) = match inst.operands.as_slice() {
         [Operand::Reg(rd), Operand::Reg(rn), Operand::Reg(rm)] => (*rd, *rn, *rm),
@@ -2520,7 +2526,7 @@ fn encode_t2_ldr_str(
     offset: u32,
     symbols: &HashMap<String, (usize, u32)>,
     equs: &HashMap<String, i64>,
-) -> Result<Vec<u8>, AsmError> {
+) -> Result<EncodedInst, AsmError> {
     let line = inst.line;
     let m = inst.mnemonic;
     let is_load = matches!(
@@ -2632,7 +2638,7 @@ fn encode_t2_ldrd_strd(
     offset: u32,
     symbols: &HashMap<String, (usize, u32)>,
     equs: &HashMap<String, i64>,
-) -> Result<Vec<u8>, AsmError> {
+) -> Result<EncodedInst, AsmError> {
     let line = inst.line;
     let load = inst.mnemonic == Mnemonic::Ldrd;
 
@@ -2704,7 +2710,7 @@ fn encode_t2_ldrd_strd(
 // LDM / STM (wide)
 // ---------------------------------------------------------------------------
 
-fn encode_t2_ldm(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
+fn encode_t2_ldm(inst: &Instruction) -> Result<EncodedInst, AsmError> {
     let line = inst.line;
     let db = matches!(inst.mnemonic, Mnemonic::Ldmdb);
     let (rn, mask) = match inst.operands.as_slice() {
@@ -2721,7 +2727,7 @@ fn encode_t2_ldm(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
     Ok(emit32_thumb(hw1.raw_value(), mask))
 }
 
-fn encode_t2_stm(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
+fn encode_t2_stm(inst: &Instruction) -> Result<EncodedInst, AsmError> {
     let line = inst.line;
     let db = matches!(inst.mnemonic, Mnemonic::Stmdb | Mnemonic::Stmfd);
     let (rn, mask) = match inst.operands.as_slice() {
@@ -2738,7 +2744,7 @@ fn encode_t2_stm(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
     Ok(emit32_thumb(hw1.raw_value(), mask))
 }
 
-fn encode_t2_push(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
+fn encode_t2_push(inst: &Instruction) -> Result<EncodedInst, AsmError> {
     let line = inst.line;
     match inst.operands.as_slice() {
         [Operand::RegList(mask)] => {
@@ -2755,7 +2761,7 @@ fn encode_t2_push(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
     }
 }
 
-fn encode_t2_pop(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
+fn encode_t2_pop(inst: &Instruction) -> Result<EncodedInst, AsmError> {
     let line = inst.line;
     match inst.operands.as_slice() {
         [Operand::RegList(mask)] => {
@@ -2781,7 +2787,7 @@ fn encode_t2_branch(
     offset: u32,
     symbols: &HashMap<String, (usize, u32)>,
     equs: &HashMap<String, i64>,
-) -> Result<Vec<u8>, AsmError> {
+) -> Result<EncodedInst, AsmError> {
     let line = inst.line;
     let target_label = match inst.operands.as_slice() {
         [Operand::Label(name)] => name,
@@ -2853,7 +2859,7 @@ fn encode_t2_branch(
 // Bit manipulation
 // ---------------------------------------------------------------------------
 
-fn encode_t2_clz_rbit(inst: &Instruction, op1: u8, op2: u8) -> Result<Vec<u8>, AsmError> {
+fn encode_t2_clz_rbit(inst: &Instruction, op1: u8, op2: u8) -> Result<EncodedInst, AsmError> {
     let line = inst.line;
     let (rd, rm) = match inst.operands.as_slice() {
         [Operand::Reg(rd), Operand::Reg(rm)] => (*rd, *rm),
@@ -2871,7 +2877,7 @@ fn encode_t2_clz_rbit(inst: &Instruction, op1: u8, op2: u8) -> Result<Vec<u8>, A
     Ok(emit32_thumb(hw1.raw_value(), hw2.raw_value()))
 }
 
-fn encode_t2_bfi(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
+fn encode_t2_bfi(inst: &Instruction) -> Result<EncodedInst, AsmError> {
     let line = inst.line;
     // BFI Rd, Rn, #lsb, #width
     let (rd, rn, lsb, width) = match inst.operands.as_slice() {
@@ -2890,7 +2896,7 @@ fn encode_t2_bfi(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
     Ok(emit32_thumb(hw1.raw_value(), hw2.raw_value()))
 }
 
-fn encode_t2_bfc(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
+fn encode_t2_bfc(inst: &Instruction) -> Result<EncodedInst, AsmError> {
     let line = inst.line;
     // BFC Rd, #lsb, #width
     let (rd, lsb, width) = match inst.operands.as_slice() {
@@ -2910,7 +2916,7 @@ fn encode_t2_bfc(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
     Ok(emit32_thumb(hw1.raw_value(), hw2.raw_value()))
 }
 
-fn encode_t2_bfx(inst: &Instruction, signed: bool) -> Result<Vec<u8>, AsmError> {
+fn encode_t2_bfx(inst: &Instruction, signed: bool) -> Result<EncodedInst, AsmError> {
     let line = inst.line;
     // UBFX/SBFX Rd, Rn, #lsb, #width
     let (rd, rn, lsb, width) = match inst.operands.as_slice() {
@@ -2933,7 +2939,7 @@ fn encode_t2_bfx(inst: &Instruction, signed: bool) -> Result<Vec<u8>, AsmError> 
 // Exclusive load / store
 // ---------------------------------------------------------------------------
 
-fn encode_t2_ldrex(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
+fn encode_t2_ldrex(inst: &Instruction) -> Result<EncodedInst, AsmError> {
     let line = inst.line;
     let (rt, rn, imm) = match inst.operands.as_slice() {
         [Operand::Reg(rt), Operand::Memory {
@@ -2957,7 +2963,7 @@ fn encode_t2_ldrex(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
     Ok(emit32_thumb(hw1.raw_value(), hw2.raw_value()))
 }
 
-fn encode_t2_strex(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
+fn encode_t2_strex(inst: &Instruction) -> Result<EncodedInst, AsmError> {
     let line = inst.line;
     let (rd, rt, rn, imm) = match inst.operands.as_slice() {
         [Operand::Reg(rd), Operand::Reg(rt), Operand::Memory {
@@ -2981,7 +2987,7 @@ fn encode_t2_strex(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
     Ok(emit32_thumb(hw1.raw_value(), hw2.raw_value()))
 }
 
-fn encode_t2_ldrex_bh(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
+fn encode_t2_ldrex_bh(inst: &Instruction) -> Result<EncodedInst, AsmError> {
     let line = inst.line;
     let (rt, rn) = match inst.operands.as_slice() {
         [Operand::Reg(rt), Operand::Memory {
@@ -3006,7 +3012,7 @@ fn encode_t2_ldrex_bh(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
     Ok(emit32_thumb(hw1.raw_value(), hw2.raw_value()))
 }
 
-fn encode_t2_strex_bh(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
+fn encode_t2_strex_bh(inst: &Instruction) -> Result<EncodedInst, AsmError> {
     let line = inst.line;
     let (rd, rt, rn) = match inst.operands.as_slice() {
         [Operand::Reg(rd), Operand::Reg(rt), Operand::Memory {
@@ -3035,7 +3041,7 @@ fn encode_t2_strex_bh(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
 // System: MRS, MSR
 // ---------------------------------------------------------------------------
 
-fn encode_t2_mrs(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
+fn encode_t2_mrs(inst: &Instruction) -> Result<EncodedInst, AsmError> {
     let line = inst.line;
     let (rd, sysm) = match inst.operands.as_slice() {
         [Operand::Reg(rd), Operand::SysReg(sysm)] => (*rd, *sysm as u16),
@@ -3052,7 +3058,7 @@ fn encode_t2_mrs(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
     Ok(emit32_thumb(hw1.raw_value(), hw2.raw_value()))
 }
 
-fn encode_t2_msr(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
+fn encode_t2_msr(inst: &Instruction) -> Result<EncodedInst, AsmError> {
     let line = inst.line;
     let (sysm, rn) = match inst.operands.as_slice() {
         [Operand::SysReg(sysm), Operand::Reg(rn)] => (*sysm as u16, *rn),
@@ -3073,7 +3079,7 @@ fn encode_t2_msr(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
 // Table branch
 // ---------------------------------------------------------------------------
 
-fn encode_t2_tb(inst: &Instruction, half: bool) -> Result<Vec<u8>, AsmError> {
+fn encode_t2_tb(inst: &Instruction, half: bool) -> Result<EncodedInst, AsmError> {
     let line = inst.line;
     let (rn, rm) = match inst.operands.as_slice() {
         [Operand::Memory {
@@ -3100,7 +3106,7 @@ fn encode_t2_tb(inst: &Instruction, half: bool) -> Result<Vec<u8>, AsmError> {
 // Saturation: SSAT, USAT
 // ---------------------------------------------------------------------------
 
-fn encode_t2_ssat(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
+fn encode_t2_ssat(inst: &Instruction) -> Result<EncodedInst, AsmError> {
     let (rd, sat, rn, shift_type, shift_amt) = parse_sat_operands(inst)?;
     // SSAT: 11110 0 11 00 sh 0 Rn | 0 imm3 Rd imm2 0 sat_imm
     let sh = shift_type == 1; // ASR=1, LSL=0
@@ -3115,7 +3121,7 @@ fn encode_t2_ssat(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
     Ok(emit32_thumb(hw1.raw_value(), hw2.raw_value()))
 }
 
-fn encode_t2_usat(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
+fn encode_t2_usat(inst: &Instruction) -> Result<EncodedInst, AsmError> {
     let (rd, sat, rn, shift_type, shift_amt) = parse_sat_operands(inst)?;
     // USAT: 11110 0 11 10 sh 0 Rn | 0 imm3 Rd imm2 0 sat_imm
     let sh = shift_type == 1;
@@ -3156,7 +3162,7 @@ fn parse_sat_operands(inst: &Instruction) -> Result<(u4, u8, u4, u8, u8), AsmErr
 // Byte reversal / extend (wide forms)
 // ---------------------------------------------------------------------------
 
-fn encode_t2_extend(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
+fn encode_t2_extend(inst: &Instruction) -> Result<EncodedInst, AsmError> {
     let line = inst.line;
     let (rd, rm) = match inst.operands.as_slice() {
         [Operand::Reg(rd), Operand::Reg(rm)] => (*rd, *rm),
@@ -3187,7 +3193,7 @@ fn encode_t2_extend(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
 // Extend and add
 // ---------------------------------------------------------------------------
 
-fn encode_t2_extend_add(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
+fn encode_t2_extend_add(inst: &Instruction) -> Result<EncodedInst, AsmError> {
     let line = inst.line;
     // SXTAB Rd, Rn, Rm [, ROR #rot]
     let (rd, rn, rm, rot) = match inst.operands.as_slice() {
@@ -3223,7 +3229,7 @@ fn encode_t2_extend_add(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
 // DSP multiply
 // ---------------------------------------------------------------------------
 
-fn encode_t2_dsp_mul(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
+fn encode_t2_dsp_mul(inst: &Instruction) -> Result<EncodedInst, AsmError> {
     let line = inst.line;
     // Most DSP multiply: Rd, Rn, Rm [, Ra]
     match inst.operands.as_slice() {
@@ -3280,7 +3286,7 @@ fn dsp_mul_opcode_4(m: Mnemonic, line: usize) -> Result<(u12, u4), AsmError> {
     })
 }
 
-fn encode_t2_dsp_long_mul(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
+fn encode_t2_dsp_long_mul(inst: &Instruction) -> Result<EncodedInst, AsmError> {
     let line = inst.line;
     let (rdlo, rdhi, rn, rm) = match inst.operands.as_slice() {
         [Operand::Reg(rdlo), Operand::Reg(rdhi), Operand::Reg(rn), Operand::Reg(rm)] => {
@@ -3310,7 +3316,7 @@ fn encode_t2_dsp_long_mul(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
 // Parallel arithmetic
 // ---------------------------------------------------------------------------
 
-fn encode_t2_parallel(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
+fn encode_t2_parallel(inst: &Instruction) -> Result<EncodedInst, AsmError> {
     let line = inst.line;
     let (rd, rn, rm) = match inst.operands.as_slice() {
         [Operand::Reg(rd), Operand::Reg(rn), Operand::Reg(rm)] => (*rd, *rn, *rm),
@@ -3378,7 +3384,7 @@ fn parallel_opcode(m: Mnemonic, _line: usize) -> Result<(u12, u4), AsmError> {
 // Saturating arithmetic: QADD, QDADD, QSUB, QDSUB
 // ---------------------------------------------------------------------------
 
-fn encode_t2_sat_arith(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
+fn encode_t2_sat_arith(inst: &Instruction) -> Result<EncodedInst, AsmError> {
     let line = inst.line;
     let (rd, rm, rn) = match inst.operands.as_slice() {
         [Operand::Reg(rd), Operand::Reg(rm), Operand::Reg(rn)] => (*rd, *rm, *rn),
@@ -3404,7 +3410,7 @@ fn encode_t2_sat_arith(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
 // Packing: PKHBT, PKHTB, SEL
 // ---------------------------------------------------------------------------
 
-fn encode_t2_pkhbt(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
+fn encode_t2_pkhbt(inst: &Instruction) -> Result<EncodedInst, AsmError> {
     let line = inst.line;
     let (rd, rn, rm, shift_amt) = match inst.operands.as_slice() {
         [Operand::Reg(rd), Operand::Reg(rn), Operand::Reg(rm)] => (*rd, *rn, *rm, 0u8),
@@ -3429,7 +3435,7 @@ fn encode_t2_pkhbt(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
     Ok(emit32_thumb(hw1.raw_value(), hw2.raw_value()))
 }
 
-fn encode_t2_sel(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
+fn encode_t2_sel(inst: &Instruction) -> Result<EncodedInst, AsmError> {
     let line = inst.line;
     let (rd, rn, rm) = match inst.operands.as_slice() {
         [Operand::Reg(rd), Operand::Reg(rn), Operand::Reg(rm)] => (*rd, *rn, *rm),
@@ -3448,7 +3454,7 @@ fn encode_t2_sel(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
 // Misc: DBG, CPS, unprivileged load/store, preload
 // ---------------------------------------------------------------------------
 
-fn encode_t2_dbg(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
+fn encode_t2_dbg(inst: &Instruction) -> Result<EncodedInst, AsmError> {
     let line = inst.line;
     let opt = match inst.operands.as_slice() {
         [Operand::Imm(n)] => *n as u16 & 0xF,
@@ -3463,7 +3469,7 @@ fn encode_t2_dbg(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
     Ok(emit32_thumb(hw1.raw_value(), hw2.raw_value()))
 }
 
-fn encode_t2_cps(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
+fn encode_t2_cps(inst: &Instruction) -> Result<EncodedInst, AsmError> {
     let line = inst.line;
     let enable = inst.mnemonic == Mnemonic::Cpsie;
     let flags = match inst.operands.as_slice() {
@@ -3489,7 +3495,7 @@ fn encode_t2_cps(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
     Ok(emit16(hw.raw_value()))
 }
 
-fn encode_t2_ldr_str_unpriv(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
+fn encode_t2_ldr_str_unpriv(inst: &Instruction) -> Result<EncodedInst, AsmError> {
     let line = inst.line;
     let (rt, rn, imm) = match inst.operands.as_slice() {
         [Operand::Reg(rt), Operand::Memory {
@@ -3532,7 +3538,7 @@ fn encode_t2_ldr_str_unpriv(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
     Ok(emit32_thumb(hw1.raw_value(), hw2.raw_value()))
 }
 
-fn encode_t2_preload(inst: &Instruction) -> Result<Vec<u8>, AsmError> {
+fn encode_t2_preload(inst: &Instruction) -> Result<EncodedInst, AsmError> {
     let line = inst.line;
     let (rn, imm) = match inst.operands.as_slice() {
         [Operand::Memory {

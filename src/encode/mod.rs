@@ -5,6 +5,27 @@ use std::collections::HashMap;
 
 use crate::ast::*;
 use crate::error::AsmError;
+
+enum EncodedInst {
+    W16(u16),
+    W32(u32),
+}
+
+impl EncodedInst {
+    fn len(&self) -> u32 {
+        match self {
+            EncodedInst::W16(_) => 2,
+            EncodedInst::W32(_) => 4,
+        }
+    }
+
+    fn extend_into(&self, buf: &mut Vec<u8>) {
+        match self {
+            EncodedInst::W16(v) => buf.extend_from_slice(&v.to_le_bytes()),
+            EncodedInst::W32(v) => buf.extend_from_slice(&v.to_le_bytes()),
+        }
+    }
+}
 use crate::{AsmConfig, AsmOutput, Section, Symbol};
 
 struct AsmState {
@@ -109,19 +130,18 @@ fn pass2(stmts: &[Statement], state: &mut AsmState) -> Result<(), AsmError> {
             Statement::Label(_, _) => {}
             Statement::Instruction(inst) => {
                 let offset = state.sections[state.current_section].offset;
-                let bytes =
-                    encode_instruction(inst, state.isa, offset, &state.symbols, &state.equs)?;
+                let enc = encode_instruction(inst, state.isa, offset, &state.symbols, &state.equs)?;
                 debug_assert_eq!(
-                    bytes.len() as u32,
+                    enc.len(),
                     instruction_size(inst, state.isa),
                     "instruction size mismatch at line {}: predicted {} bytes, encoded {}",
                     inst.line,
                     instruction_size(inst, state.isa),
-                    bytes.len()
+                    enc.len()
                 );
                 let sec = &mut state.sections[state.current_section];
-                sec.data.extend_from_slice(&bytes);
-                sec.offset += bytes.len() as u32;
+                enc.extend_into(&mut sec.data);
+                sec.offset += enc.len();
             }
             Statement::Directive(dir, _line) => {
                 handle_directive_pass2(dir, state)?;
@@ -332,7 +352,7 @@ fn encode_instruction(
     offset: u32,
     symbols: &HashMap<String, (usize, u32)>,
     equs: &HashMap<String, i64>,
-) -> Result<Vec<u8>, AsmError> {
+) -> Result<EncodedInst, AsmError> {
     match isa {
         Isa::Thumb => thumb::encode_thumb(inst, offset, symbols, equs),
         Isa::A32 => a32::encode_a32(inst, offset, symbols, equs),
