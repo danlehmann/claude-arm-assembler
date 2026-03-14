@@ -2642,3 +2642,25 @@ fn ldr_negative_register_post_indexed() {
     check_a32("ldr r0, [r1], -r2", Cpu::CortexA7);
     check_a32("ldr r0, [r1], -r2, lsl #2", Cpu::CortexA7);
 }
+
+// ---------------------------------------------------------------------------
+// .thumb / .arm mid-stream ISA switching
+// ---------------------------------------------------------------------------
+
+#[test]
+fn isa_switch_arm_to_thumb_and_back() {
+    // Start in ARM, switch to Thumb, switch back to ARM
+    check_a32(
+        "nop\n.thumb\n.balign 2\nnop\n.arm\n.balign 4\nnop",
+        Cpu::CortexA7,
+    );
+}
+
+#[test]
+fn isa_switch_thumb_to_arm() {
+    // Two thumb nops (4 bytes) then switch to ARM for clean alignment
+    check_thumb(
+        "nop\nnop\n.arm\nnop\n.thumb\nnop\nnop",
+        Cpu::CortexA7,
+    );
+}
