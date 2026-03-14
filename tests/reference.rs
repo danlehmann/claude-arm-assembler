@@ -2616,3 +2616,29 @@ fn fpu_directive() {
     check_a32(".fpu vfpv3-d16\nnop", Cpu::CortexA7);
     check_a32(".fpu vfpv4-d16\nmov r0, #1", Cpu::CortexA7);
 }
+
+// ---------------------------------------------------------------------------
+// Negative register offset in memory operands
+// ---------------------------------------------------------------------------
+
+#[test]
+fn ldr_negative_register_offset() {
+    // LDR with -Rm (subtract register)
+    check_a32("ldr r0, [r1, -r2]", Cpu::CortexA7);
+    check_a32("ldr r0, [r1, -r2, lsl #2]", Cpu::CortexA7);
+    check_a32("str r0, [r1, -r2]", Cpu::CortexA7);
+    check_a32("ldrb r0, [r1, -r2]", Cpu::CortexA7);
+    check_a32("ldrh r0, [r1, -r2]", Cpu::CortexA7);
+}
+
+#[test]
+fn ldr_negative_register_pre_indexed() {
+    check_a32("ldr r0, [r1, -r2]!", Cpu::CortexA7);
+    check_a32("ldr r0, [r1, -r2, lsl #2]!", Cpu::CortexA7);
+}
+
+#[test]
+fn ldr_negative_register_post_indexed() {
+    check_a32("ldr r0, [r1], -r2", Cpu::CortexA7);
+    check_a32("ldr r0, [r1], -r2, lsl #2", Cpu::CortexA7);
+}
