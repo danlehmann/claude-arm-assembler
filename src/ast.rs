@@ -367,6 +367,25 @@ pub enum Mnemonic {
     Pld,
     Pldw,
     Pli,
+    // --- VFP / Floating-point ---
+    Vadd,
+    Vsub,
+    Vmul,
+    Vdiv,
+    Vsqrt,
+    Vabs,
+    Vneg,
+    Vmov,
+    Vcmp,
+    Vcmpe,
+    Vcvt,
+    Vcvtr,
+    Vldr,
+    Vstr,
+    Vpush,
+    Vpop,
+    Vmrs,
+    Vmsr,
 }
 
 impl Mnemonic {
@@ -607,6 +626,25 @@ pub const MNEMONICS: &[(&str, Mnemonic)] = &[
     ("SWP", Mnemonic::Swp),
     ("PLD", Mnemonic::Pld),
     ("PLI", Mnemonic::Pli),
+    // --- VFP (parsed specially but listed here for mnemonic recognition) ---
+    ("VCMPE", Mnemonic::Vcmpe),
+    ("VPUSH", Mnemonic::Vpush),
+    ("VPOP", Mnemonic::Vpop),
+    ("VSQRT", Mnemonic::Vsqrt),
+    ("VCVTR", Mnemonic::Vcvtr),
+    ("VCVT", Mnemonic::Vcvt),
+    ("VCMP", Mnemonic::Vcmp),
+    ("VADD", Mnemonic::Vadd),
+    ("VSUB", Mnemonic::Vsub),
+    ("VMUL", Mnemonic::Vmul),
+    ("VDIV", Mnemonic::Vdiv),
+    ("VABS", Mnemonic::Vabs),
+    ("VNEG", Mnemonic::Vneg),
+    ("VMOV", Mnemonic::Vmov),
+    ("VLDR", Mnemonic::Vldr),
+    ("VSTR", Mnemonic::Vstr),
+    ("VMRS", Mnemonic::Vmrs),
+    ("VMSR", Mnemonic::Vmsr),
     // --- 2 characters ---
     ("BL", Mnemonic::Bl),
     ("BX", Mnemonic::Bx),
@@ -638,6 +676,28 @@ pub enum Expr {
     Div(Box<Expr>, Box<Expr>),
 }
 
+/// Floating-point precision suffix (.F32 / .F64).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FpSize {
+    F32,
+    F64,
+}
+
+/// VCVT conversion kind, parsed from the double-suffix (e.g. .F32.S32).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VcvtKind {
+    F32ToF64,
+    F64ToF32,
+    F32ToS32,
+    F32ToU32,
+    F64ToS32,
+    F64ToU32,
+    S32ToF32,
+    U32ToF32,
+    S32ToF64,
+    U32ToF64,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Operand {
     Reg(u4),
@@ -651,7 +711,23 @@ pub enum Operand {
         writeback: bool,
     },
     Shifted(u4, ShiftType, Box<Operand>),
-    SysReg(u8), // system register encoding (for MRS/MSR)
+    SysReg(u8),
+    /// Single-precision FP register S0-S31
+    SReg(u8),
+    /// Double-precision FP register D0-D15 (D0-D31 for VFPv3-D32)
+    DReg(u8),
+    /// FP register list for VPUSH/VPOP: {Sx-Sy} or {Dx-Dy}
+    FpRegList {
+        start: u8,
+        count: u8,
+        double: bool,
+    },
+    /// APSR_nzcv (used in VMRS APSR_nzcv, FPSCR)
+    ApsrNzcv,
+    /// FPSCR system register (for VMRS/VMSR)
+    Fpscr,
+    /// FP immediate (8-bit encoded float)
+    FpImm(f64),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -663,6 +739,10 @@ pub struct Instruction {
     pub writeback: bool,
     pub operands: Vec<Operand>,
     pub line: usize,
+    /// FP precision suffix (.F32 / .F64) for VFP instructions.
+    pub fp_size: Option<FpSize>,
+    /// VCVT conversion kind (e.g. .F32.S32).
+    pub vcvt_kind: Option<VcvtKind>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

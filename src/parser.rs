@@ -346,7 +346,8 @@ impl<'a> Parser<'a> {
             _ => return Err(AsmError::new(line, "expected instruction mnemonic")),
         };
 
-        let (mnemonic, condition, set_flags, wide) = parse_mnemonic(&raw, line)?;
+        let (mnemonic, condition, set_flags, wide, fp_size, vcvt_kind) =
+            parse_mnemonic(&raw, line)?;
 
         // Special handling for IT blocks: parse T/E pattern and condition operand
         if mnemonic == Mnemonic::It {
@@ -391,6 +392,8 @@ impl<'a> Parser<'a> {
                 writeback: false,
                 operands: vec![Operand::Imm(mask as i64)],
                 line,
+                fp_size: None,
+                vcvt_kind: None,
             });
         }
 
@@ -407,6 +410,8 @@ impl<'a> Parser<'a> {
                 writeback: false,
                 operands: vec![Operand::Reg(rd), Operand::SysReg(sysm)],
                 line,
+                fp_size,
+                vcvt_kind,
             });
         }
         if mnemonic == Mnemonic::Msr {
@@ -421,16 +426,59 @@ impl<'a> Parser<'a> {
                 writeback: false,
                 operands: vec![Operand::SysReg(sysm), Operand::Reg(rn)],
                 line,
+                fp_size,
+                vcvt_kind,
+            });
+        }
+
+        // VMRS / VMSR — special operand parsing
+        if mnemonic == Mnemonic::Vmrs {
+            // VMRS Rd, FPSCR  or  VMRS APSR_nzcv, FPSCR
+            let first = self.parse_vfp_or_core_operand()?;
+            self.expect(&TokenKind::Comma)?;
+            let second = self.parse_vfp_or_core_operand()?;
+            return Ok(Instruction {
+                mnemonic,
+                condition,
+                set_flags,
+                wide,
+                writeback: false,
+                operands: vec![first, second],
+                line,
+                fp_size,
+                vcvt_kind,
+            });
+        }
+        if mnemonic == Mnemonic::Vmsr {
+            // VMSR FPSCR, Rn
+            let first = self.parse_vfp_or_core_operand()?;
+            self.expect(&TokenKind::Comma)?;
+            let second = self.parse_vfp_or_core_operand()?;
+            return Ok(Instruction {
+                mnemonic,
+                condition,
+                set_flags,
+                wide,
+                writeback: false,
+                operands: vec![first, second],
+                line,
+                fp_size,
+                vcvt_kind,
             });
         }
 
         let mut operands = Vec::new();
         let mut writeback = false;
+        let is_vfp = is_vfp_mnemonic(mnemonic);
         while !self.at_end_of_statement() {
             if !operands.is_empty() {
                 self.expect(&TokenKind::Comma)?;
             }
-            let op = self.parse_operand()?;
+            let op = if is_vfp {
+                self.parse_vfp_operand()?
+            } else {
+                self.parse_operand()?
+            };
             operands.push(op);
 
             // Check for ! (writeback) after a register operand (for LDM/STM)
@@ -458,6 +506,8 @@ impl<'a> Parser<'a> {
             writeback,
             operands,
             line,
+            fp_size,
+            vcvt_kind,
         })
     }
 
@@ -527,6 +577,24 @@ impl<'a> Parser<'a> {
             }
             TokenKind::Ident(ref s) => {
                 let s = s.clone();
+                let upper = s.to_ascii_uppercase();
+                // Check FP registers and special names
+                if let Some(n) = parse_sreg(&upper) {
+                    self.advance();
+                    return Ok(Operand::SReg(n));
+                }
+                if let Some(n) = parse_dreg(&upper) {
+                    self.advance();
+                    return Ok(Operand::DReg(n));
+                }
+                if upper == "FPSCR" {
+                    self.advance();
+                    return Ok(Operand::Fpscr);
+                }
+                if upper == "APSR_NZCV" {
+                    self.advance();
+                    return Ok(Operand::ApsrNzcv);
+                }
                 if let Some(reg) = parse_register(&s) {
                     self.advance();
                     Ok(Operand::Reg(reg))
@@ -801,6 +869,221 @@ impl<'a> Parser<'a> {
         }
     }
 
+    /// Parse an operand that can be an FP register, core register, FP register list,
+    /// memory, FP immediate, or label/expression. Used for VFP instructions.
+    fn parse_vfp_operand(&mut self) -> Result<Operand, AsmError> {
+        match self.peek_kind().clone() {
+            TokenKind::LBrace => self.parse_fp_reglist(),
+            TokenKind::LBracket => self.parse_memory(),
+            TokenKind::Hash => {
+                self.advance();
+                // Try to parse as floating-point immediate: #1.0, #-0.5, etc.
+                // After '#', we may see a Number followed by an Ident starting with '.'
+                // (because the lexer treats '.0' as an ident), or just a plain integer.
+                let neg = self.eat(&TokenKind::Minus);
+                match self.peek_kind().clone() {
+                    TokenKind::Number(int_part) => {
+                        self.advance();
+                        // Check if next token is a dot-suffix like ".0", ".5", etc.
+                        if let TokenKind::Ident(ref s) = self.peek_kind().clone() {
+                            if s.starts_with('.') {
+                                // Try to parse as float: combine int_part + suffix
+                                let float_str = format!("{}{}", int_part, s);
+                                if let Ok(val) = float_str.parse::<f64>() {
+                                    self.advance(); // consume the dot-suffix ident
+                                    let val = if neg { -val } else { val };
+                                    return Ok(Operand::FpImm(val));
+                                }
+                            }
+                        }
+                        // Plain integer immediate
+                        let val = if neg { -int_part } else { int_part };
+                        Ok(Operand::Imm(val))
+                    }
+                    _ => {
+                        let val = self.parse_number()?;
+                        let val = if neg { -val } else { val };
+                        Ok(Operand::Imm(val))
+                    }
+                }
+            }
+            TokenKind::Ident(ref s) => {
+                let s = s.clone();
+                let upper = s.to_ascii_uppercase();
+                // FP registers
+                if let Some(n) = parse_sreg(&upper) {
+                    self.advance();
+                    return Ok(Operand::SReg(n));
+                }
+                if let Some(n) = parse_dreg(&upper) {
+                    self.advance();
+                    return Ok(Operand::DReg(n));
+                }
+                // Special registers
+                if upper == "FPSCR" {
+                    self.advance();
+                    return Ok(Operand::Fpscr);
+                }
+                if upper == "APSR_NZCV" {
+                    self.advance();
+                    return Ok(Operand::ApsrNzcv);
+                }
+                // Core registers
+                if let Some(reg) = parse_register(&s) {
+                    self.advance();
+                    return Ok(Operand::Reg(reg));
+                }
+                // Label / expression
+                let expr = self.parse_full_expr()?;
+                Ok(Operand::Expr(expr))
+            }
+            TokenKind::Minus => {
+                self.advance();
+                let val = self.parse_number()?;
+                Ok(Operand::Imm(-val))
+            }
+            TokenKind::Number(_) => {
+                let expr = self.parse_full_expr()?;
+                match expr {
+                    Expr::Num(n) => Ok(Operand::Imm(n)),
+                    _ => Ok(Operand::Expr(expr)),
+                }
+            }
+            _ => Err(AsmError::new(
+                self.line(),
+                format!("unexpected token in VFP operand: {:?}", self.peek_kind()),
+            )),
+        }
+    }
+
+    /// Parse an operand for VMRS/VMSR: can be APSR_nzcv, FPSCR, or a core register.
+    fn parse_vfp_or_core_operand(&mut self) -> Result<Operand, AsmError> {
+        let line = self.line();
+        match self.peek_kind().clone() {
+            TokenKind::Ident(ref s) => {
+                let s = s.clone();
+                let upper = s.to_ascii_uppercase();
+                if upper == "FPSCR" {
+                    self.advance();
+                    Ok(Operand::Fpscr)
+                } else if upper == "APSR_NZCV" {
+                    self.advance();
+                    Ok(Operand::ApsrNzcv)
+                } else if let Some(reg) = parse_register(&s) {
+                    self.advance();
+                    Ok(Operand::Reg(reg))
+                } else {
+                    Err(AsmError::new(
+                        line,
+                        format!("expected register, FPSCR, or APSR_nzcv, got '{s}'"),
+                    ))
+                }
+            }
+            _ => Err(AsmError::new(line, "expected register or special VFP operand")),
+        }
+    }
+
+    /// Parse an FP register list: {S0-S3} or {S0, S1, S2} or {D0-D3} etc.
+    /// Only contiguous ranges are valid for VPUSH/VPOP.
+    fn parse_fp_reglist(&mut self) -> Result<Operand, AsmError> {
+        self.expect(&TokenKind::LBrace)?;
+        let line = self.line();
+
+        // Determine if this is an S or D register list from the first register
+        let (first_reg, is_double) = match self.peek_kind().clone() {
+            TokenKind::Ident(ref s) => {
+                let upper = s.to_ascii_uppercase();
+                if let Some(n) = parse_sreg(&upper) {
+                    self.advance();
+                    (n, false)
+                } else if let Some(n) = parse_dreg(&upper) {
+                    self.advance();
+                    (n, true)
+                } else {
+                    return Err(AsmError::new(line, "expected FP register in register list"));
+                }
+            }
+            _ => return Err(AsmError::new(line, "expected FP register in register list")),
+        };
+
+        // Check for range: {S0-S3}
+        if self.eat(&TokenKind::Minus) {
+            let end_reg = match self.peek_kind().clone() {
+                TokenKind::Ident(ref s) => {
+                    let upper = s.to_ascii_uppercase();
+                    let n = if is_double {
+                        parse_dreg(&upper)
+                    } else {
+                        parse_sreg(&upper)
+                    };
+                    match n {
+                        Some(r) => {
+                            self.advance();
+                            r
+                        }
+                        None => {
+                            return Err(AsmError::new(
+                                line,
+                                "expected matching FP register type in range",
+                            ))
+                        }
+                    }
+                }
+                _ => return Err(AsmError::new(line, "expected FP register after '-'")),
+            };
+            if end_reg < first_reg {
+                return Err(AsmError::new(line, "invalid FP register range"));
+            }
+            self.expect(&TokenKind::RBrace)?;
+            return Ok(Operand::FpRegList {
+                start: first_reg,
+                count: end_reg - first_reg + 1,
+                double: is_double,
+            });
+        }
+
+        // Comma-separated list: {S0, S1, S2} — must be contiguous
+        let mut count: u8 = 1;
+        let mut last_reg = first_reg;
+        while self.eat(&TokenKind::Comma) {
+            let next_reg = match self.peek_kind().clone() {
+                TokenKind::Ident(ref s) => {
+                    let upper = s.to_ascii_uppercase();
+                    let n = if is_double {
+                        parse_dreg(&upper)
+                    } else {
+                        parse_sreg(&upper)
+                    };
+                    match n {
+                        Some(r) => {
+                            self.advance();
+                            r
+                        }
+                        None => {
+                            return Err(AsmError::new(
+                                line,
+                                "expected matching FP register type in list",
+                            ))
+                        }
+                    }
+                }
+                _ => return Err(AsmError::new(line, "expected FP register after ','")),
+            };
+            if next_reg != last_reg + 1 {
+                return Err(AsmError::new(line, "FP register list must be contiguous"));
+            }
+            last_reg = next_reg;
+            count += 1;
+        }
+
+        self.expect(&TokenKind::RBrace)?;
+        Ok(Operand::FpRegList {
+            start: first_reg,
+            count,
+            double: is_double,
+        })
+    }
+
     fn parse_sysreg(&mut self) -> Result<u8, AsmError> {
         let name = self.parse_ident()?;
         let upper = name.to_ascii_uppercase();
@@ -876,27 +1159,89 @@ fn is_shift_type(s: &str) -> bool {
     )
 }
 
+/// Parsed VFP type suffix information.
+struct FpSuffix {
+    fp_size: Option<FpSize>,
+    vcvt_kind: Option<VcvtKind>,
+}
+
+/// Try to parse VFP type suffixes from a dot-separated tail string.
+/// `tail` is the portion after the mnemonic base, e.g. ".F32" or ".F32.S32".
+fn parse_fp_suffix(tail: &str) -> Option<FpSuffix> {
+    // Split on dots (tail starts with '.', so first element is empty)
+    let parts: Vec<&str> = tail.split('.').filter(|s| !s.is_empty()).collect();
+    match parts.len() {
+        1 => match parts[0] {
+            "F32" => Some(FpSuffix {
+                fp_size: Some(FpSize::F32),
+                vcvt_kind: None,
+            }),
+            "F64" => Some(FpSuffix {
+                fp_size: Some(FpSize::F64),
+                vcvt_kind: None,
+            }),
+            _ => None,
+        },
+        2 => {
+            // Double suffix for VCVT: .F32.S32, .F64.F32, etc.
+            let kind = match (parts[0], parts[1]) {
+                ("F32", "F64") => VcvtKind::F32ToF64,
+                ("F64", "F32") => VcvtKind::F64ToF32,
+                ("F32", "S32") => VcvtKind::F32ToS32,
+                ("F32", "U32") => VcvtKind::F32ToU32,
+                ("F64", "S32") => VcvtKind::F64ToS32,
+                ("F64", "U32") => VcvtKind::F64ToU32,
+                ("S32", "F32") => VcvtKind::S32ToF32,
+                ("U32", "F32") => VcvtKind::U32ToF32,
+                ("S32", "F64") => VcvtKind::S32ToF64,
+                ("U32", "F64") => VcvtKind::U32ToF64,
+                _ => return None,
+            };
+            // For double suffixes, fp_size is derived from the destination type (first suffix)
+            let fp_size = match parts[0] {
+                "F32" | "S32" | "U32" => Some(FpSize::F32),
+                "F64" => Some(FpSize::F64),
+                _ => None,
+            };
+            Some(FpSuffix {
+                fp_size,
+                vcvt_kind: Some(kind),
+            })
+        }
+        _ => None,
+    }
+}
+
 fn parse_mnemonic(
     raw: &str,
     line: usize,
-) -> Result<(Mnemonic, Option<Condition>, bool, bool), AsmError> {
+) -> Result<(Mnemonic, Option<Condition>, bool, bool, Option<FpSize>, Option<VcvtKind>), AsmError> {
     let upper = raw.to_ascii_uppercase();
 
-    // Split width suffix (.W, .N)
-    let (main, wide) = if let Some(dot_pos) = upper.rfind('.') {
-        let suffix = &upper[dot_pos + 1..];
-        match suffix {
-            "W" => (&upper[..dot_pos], true),
-            "N" => (&upper[..dot_pos], false),
+    // Split width suffix (.W, .N) — but only if not a VFP suffix.
+    // VFP suffixes like .F32, .F64, .F32.S32 are handled separately.
+    // Strategy: find the first dot. Everything before it is the "main" part
+    // (which may contain condition codes etc). Everything from the first dot
+    // onward is the suffix (.W, .N, .F32, .F64, .F32.S32, etc).
+    let (main, wide, fp_size, vcvt_kind) = if let Some(dot_pos) = upper.find('.') {
+        let tail = &upper[dot_pos..]; // e.g. ".F32" or ".F32.S32" or ".W"
+        let base = &upper[..dot_pos];
+        match tail {
+            ".W" => (base, true, None, None),
+            ".N" => (base, false, None, None),
             _ => {
-                return Err(AsmError::new(
-                    line,
-                    format!("unknown width suffix: .{suffix}"),
-                ))
+                if let Some(fps) = parse_fp_suffix(tail) {
+                    (base, false, fps.fp_size, fps.vcvt_kind)
+                } else {
+                    return Err(AsmError::new(
+                        line,
+                        format!("unknown suffix: {tail}"),
+                    ));
+                }
             }
         }
     } else {
-        (upper.as_str(), false)
+        (upper.as_str(), false, None, None)
     };
 
     // Special case: IT block (IT, ITE, ITT, ITTE, ITET, etc.)
@@ -905,7 +1250,7 @@ fn parse_mnemonic(
         let suffix = &main[2..];
         if suffix.is_empty() || (suffix.len() <= 3 && suffix.chars().all(|c| c == 'T' || c == 'E'))
         {
-            return Ok((Mnemonic::It, None, false, wide));
+            return Ok((Mnemonic::It, None, false, wide, fp_size, vcvt_kind));
         }
     }
 
@@ -917,7 +1262,7 @@ fn parse_mnemonic(
             if let Some(cond) = Condition::from_str(cond_str) {
                 let base = &without_s[..without_s.len() - 2];
                 if let Some(mnemonic) = lookup_mnemonic(base) {
-                    return Ok((mnemonic, Some(cond), true, wide));
+                    return Ok((mnemonic, Some(cond), true, wide, fp_size, vcvt_kind));
                 }
             }
         }
@@ -929,7 +1274,7 @@ fn parse_mnemonic(
         if let Some(cond) = Condition::from_str(cond_str) {
             let base = &main[..main.len() - 2];
             if let Some(mnemonic) = lookup_mnemonic(base) {
-                return Ok((mnemonic, Some(cond), false, wide));
+                return Ok((mnemonic, Some(cond), false, wide, fp_size, vcvt_kind));
             }
         }
     }
@@ -938,13 +1283,13 @@ fn parse_mnemonic(
     if main.len() >= 2 && main.ends_with('S') {
         let base = &main[..main.len() - 1];
         if let Some(mnemonic) = lookup_mnemonic(base) {
-            return Ok((mnemonic, None, true, wide));
+            return Ok((mnemonic, None, true, wide, fp_size, vcvt_kind));
         }
     }
 
     // Try: just base
     if let Some(mnemonic) = lookup_mnemonic(main) {
-        return Ok((mnemonic, None, false, wide));
+        return Ok((mnemonic, None, false, wide, fp_size, vcvt_kind));
     }
 
     Err(AsmError::new(line, format!("unknown instruction: {raw}")))
@@ -955,4 +1300,245 @@ fn lookup_mnemonic(s: &str) -> Option<Mnemonic> {
         .iter()
         .find(|(name, _)| *name == s)
         .map(|(_, m)| *m)
+}
+
+/// Parse a single-precision register name (S0-S31). Input must be uppercase.
+fn parse_sreg(s: &str) -> Option<u8> {
+    if s.starts_with('S') && s.len() >= 2 {
+        let num: u8 = s[1..].parse().ok()?;
+        if num <= 31 {
+            return Some(num);
+        }
+    }
+    None
+}
+
+/// Parse a double-precision register name (D0-D31). Input must be uppercase.
+fn parse_dreg(s: &str) -> Option<u8> {
+    if s.starts_with('D') && s.len() >= 2 {
+        let num: u8 = s[1..].parse().ok()?;
+        if num <= 31 {
+            return Some(num);
+        }
+    }
+    None
+}
+
+/// Whether a mnemonic is a VFP instruction (uses FP register operands).
+fn is_vfp_mnemonic(m: Mnemonic) -> bool {
+    matches!(
+        m,
+        Mnemonic::Vadd
+            | Mnemonic::Vsub
+            | Mnemonic::Vmul
+            | Mnemonic::Vdiv
+            | Mnemonic::Vsqrt
+            | Mnemonic::Vabs
+            | Mnemonic::Vneg
+            | Mnemonic::Vmov
+            | Mnemonic::Vcmp
+            | Mnemonic::Vcmpe
+            | Mnemonic::Vcvt
+            | Mnemonic::Vcvtr
+            | Mnemonic::Vldr
+            | Mnemonic::Vstr
+            | Mnemonic::Vpush
+            | Mnemonic::Vpop
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::lexer::tokenize;
+
+    fn parse_one(src: &str) -> Instruction {
+        let tokens = tokenize(src).unwrap();
+        let stmts = parse(&tokens).unwrap();
+        match stmts.into_iter().next().unwrap() {
+            Statement::Instruction(inst) => inst,
+            other => panic!("expected instruction, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn vfp_vadd_f32() {
+        let inst = parse_one("VADD.F32 S0, S1, S2\n");
+        assert_eq!(inst.mnemonic, Mnemonic::Vadd);
+        assert_eq!(inst.fp_size, Some(FpSize::F32));
+        assert_eq!(inst.operands, vec![Operand::SReg(0), Operand::SReg(1), Operand::SReg(2)]);
+    }
+
+    #[test]
+    fn vfp_vadd_f64() {
+        let inst = parse_one("VADD.F64 D0, D1, D2\n");
+        assert_eq!(inst.mnemonic, Mnemonic::Vadd);
+        assert_eq!(inst.fp_size, Some(FpSize::F64));
+        assert_eq!(inst.operands, vec![Operand::DReg(0), Operand::DReg(1), Operand::DReg(2)]);
+    }
+
+    #[test]
+    fn vfp_conditional() {
+        let inst = parse_one("VADDNE.F64 D0, D1, D2\n");
+        assert_eq!(inst.mnemonic, Mnemonic::Vadd);
+        assert_eq!(inst.condition, Some(Condition::Ne));
+        assert_eq!(inst.fp_size, Some(FpSize::F64));
+    }
+
+    #[test]
+    fn vfp_vcvt_double_suffix() {
+        let inst = parse_one("VCVT.F32.S32 S0, S1\n");
+        assert_eq!(inst.mnemonic, Mnemonic::Vcvt);
+        assert_eq!(inst.vcvt_kind, Some(VcvtKind::F32ToS32));
+
+        let inst = parse_one("VCVT.S32.F64 S0, D1\n");
+        assert_eq!(inst.vcvt_kind, Some(VcvtKind::S32ToF64));
+
+        let inst = parse_one("VCVT.F64.F32 D0, S1\n");
+        assert_eq!(inst.vcvt_kind, Some(VcvtKind::F64ToF32));
+    }
+
+    #[test]
+    fn vfp_vpush_range() {
+        let inst = parse_one("VPUSH {S0-S3}\n");
+        assert_eq!(inst.mnemonic, Mnemonic::Vpush);
+        assert_eq!(
+            inst.operands,
+            vec![Operand::FpRegList { start: 0, count: 4, double: false }]
+        );
+    }
+
+    #[test]
+    fn vfp_vpop_dregs() {
+        let inst = parse_one("VPOP {D4-D7}\n");
+        assert_eq!(inst.mnemonic, Mnemonic::Vpop);
+        assert_eq!(
+            inst.operands,
+            vec![Operand::FpRegList { start: 4, count: 4, double: true }]
+        );
+    }
+
+    #[test]
+    fn vfp_vpush_comma_list() {
+        let inst = parse_one("VPUSH {S0, S1, S2}\n");
+        assert_eq!(
+            inst.operands,
+            vec![Operand::FpRegList { start: 0, count: 3, double: false }]
+        );
+    }
+
+    #[test]
+    fn vfp_vmrs_apsr() {
+        let inst = parse_one("VMRS APSR_nzcv, FPSCR\n");
+        assert_eq!(inst.mnemonic, Mnemonic::Vmrs);
+        assert_eq!(inst.operands, vec![Operand::ApsrNzcv, Operand::Fpscr]);
+    }
+
+    #[test]
+    fn vfp_vmrs_reg() {
+        let inst = parse_one("VMRS R0, FPSCR\n");
+        assert_eq!(inst.operands[0], Operand::Reg(u4::new(0)));
+        assert_eq!(inst.operands[1], Operand::Fpscr);
+    }
+
+    #[test]
+    fn vfp_vmsr() {
+        let inst = parse_one("VMSR FPSCR, R0\n");
+        assert_eq!(inst.operands[0], Operand::Fpscr);
+        assert_eq!(inst.operands[1], Operand::Reg(u4::new(0)));
+    }
+
+    #[test]
+    fn vfp_vldr_memory() {
+        let inst = parse_one("VLDR S0, [R1, #8]\n");
+        assert_eq!(inst.mnemonic, Mnemonic::Vldr);
+        assert_eq!(inst.operands[0], Operand::SReg(0));
+        assert!(matches!(inst.operands[1], Operand::Memory { .. }));
+    }
+
+    #[test]
+    fn vfp_vmov_fp_imm() {
+        let inst = parse_one("VMOV.F32 S0, #1.0\n");
+        assert_eq!(inst.mnemonic, Mnemonic::Vmov);
+        assert_eq!(inst.fp_size, Some(FpSize::F32));
+        assert_eq!(inst.operands[0], Operand::SReg(0));
+        assert_eq!(inst.operands[1], Operand::FpImm(1.0));
+    }
+
+    #[test]
+    fn vfp_vmov_neg_fp_imm() {
+        let inst = parse_one("VMOV.F32 S0, #-0.5\n");
+        assert_eq!(inst.operands[1], Operand::FpImm(-0.5));
+    }
+
+    #[test]
+    fn vfp_vcmp_f32() {
+        let inst = parse_one("VCMP.F32 S0, S1\n");
+        assert_eq!(inst.mnemonic, Mnemonic::Vcmp);
+        assert_eq!(inst.fp_size, Some(FpSize::F32));
+        assert_eq!(inst.operands, vec![Operand::SReg(0), Operand::SReg(1)]);
+    }
+
+    #[test]
+    fn vfp_sreg_boundaries() {
+        let inst = parse_one("VMOV.F32 S31, S0\n");
+        assert_eq!(inst.operands[0], Operand::SReg(31));
+    }
+
+    #[test]
+    fn vfp_dreg_boundaries() {
+        let inst = parse_one("VMOV.F64 D15, D0\n");
+        assert_eq!(inst.operands[0], Operand::DReg(15));
+    }
+
+    #[test]
+    fn vfp_vcmpe_f64() {
+        let inst = parse_one("VCMPE.F64 D0, D1\n");
+        assert_eq!(inst.mnemonic, Mnemonic::Vcmpe);
+        assert_eq!(inst.fp_size, Some(FpSize::F64));
+    }
+
+    #[test]
+    fn vfp_vsqrt() {
+        let inst = parse_one("VSQRT.F32 S0, S1\n");
+        assert_eq!(inst.mnemonic, Mnemonic::Vsqrt);
+        assert_eq!(inst.fp_size, Some(FpSize::F32));
+    }
+
+    #[test]
+    fn vfp_vmov_core_to_sreg() {
+        // VMOV S0, R0 — core register to FP register
+        let inst = parse_one("VMOV S0, R0\n");
+        assert_eq!(inst.mnemonic, Mnemonic::Vmov);
+        assert_eq!(inst.operands[0], Operand::SReg(0));
+        assert_eq!(inst.operands[1], Operand::Reg(u4::new(0)));
+    }
+
+    #[test]
+    fn existing_sp_still_works() {
+        // Make sure SP is not confused with S-register parsing
+        let inst = parse_one("MOV R0, SP\n");
+        assert_eq!(inst.operands[1], Operand::Reg(u4::new(13)));
+    }
+
+    #[test]
+    fn vfp_vcvt_u32_f32() {
+        let inst = parse_one("VCVT.U32.F32 S0, S1\n");
+        assert_eq!(inst.vcvt_kind, Some(VcvtKind::U32ToF32));
+    }
+
+    #[test]
+    fn vfp_no_suffix() {
+        // VPUSH/VPOP don't need .F32/.F64
+        let inst = parse_one("VPUSH {D0-D3}\n");
+        assert_eq!(inst.fp_size, None);
+        assert_eq!(inst.mnemonic, Mnemonic::Vpush);
+    }
+
+    #[test]
+    fn vfp_vcvtr() {
+        let inst = parse_one("VCVTR.S32.F32 S0, S1\n");
+        assert_eq!(inst.mnemonic, Mnemonic::Vcvtr);
+        assert_eq!(inst.vcvt_kind, Some(VcvtKind::S32ToF32));
+    }
 }
