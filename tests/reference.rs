@@ -2722,3 +2722,256 @@ fn if_with_labels() {
         Cpu::CortexA7,
     );
 }
+
+// ---------------------------------------------------------------------------
+// VFP tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn vfp_vadd_f32() {
+    check_a32(".fpu vfpv3-d16\nvadd.f32 s0, s1, s2", Cpu::CortexA7);
+    check_a32(".fpu vfpv3-d16\nvadd.f32 s10, s20, s30", Cpu::CortexA7);
+}
+
+#[test]
+fn vfp_vadd_f64() {
+    check_a32(".fpu vfpv3-d16\nvadd.f64 d0, d1, d2", Cpu::CortexA7);
+    check_a32(".fpu vfpv3-d16\nvadd.f64 d10, d5, d15", Cpu::CortexA7);
+}
+
+#[test]
+fn vfp_vsub_f32() {
+    check_a32(".fpu vfpv3-d16\nvsub.f32 s0, s1, s2", Cpu::CortexA7);
+    check_a32(".fpu vfpv3-d16\nvsub.f32 s31, s0, s1", Cpu::CortexA7);
+}
+
+#[test]
+fn vfp_vsub_f64() {
+    check_a32(".fpu vfpv3-d16\nvsub.f64 d0, d1, d2", Cpu::CortexA7);
+}
+
+#[test]
+fn vfp_vmul_f32() {
+    check_a32(".fpu vfpv3-d16\nvmul.f32 s0, s1, s2", Cpu::CortexA7);
+    check_a32(".fpu vfpv3-d16\nvmul.f32 s15, s16, s17", Cpu::CortexA7);
+}
+
+#[test]
+fn vfp_vmul_f64() {
+    check_a32(".fpu vfpv3-d16\nvmul.f64 d0, d1, d2", Cpu::CortexA7);
+}
+
+#[test]
+fn vfp_vdiv_f32() {
+    check_a32(".fpu vfpv3-d16\nvdiv.f32 s0, s1, s2", Cpu::CortexA7);
+}
+
+#[test]
+fn vfp_vdiv_f64() {
+    check_a32(".fpu vfpv3-d16\nvdiv.f64 d0, d1, d2", Cpu::CortexA7);
+}
+
+#[test]
+fn vfp_vabs_f32() {
+    check_a32(".fpu vfpv3-d16\nvabs.f32 s0, s1", Cpu::CortexA7);
+    check_a32(".fpu vfpv3-d16\nvabs.f32 s31, s30", Cpu::CortexA7);
+}
+
+#[test]
+fn vfp_vabs_f64() {
+    check_a32(".fpu vfpv3-d16\nvabs.f64 d0, d1", Cpu::CortexA7);
+}
+
+#[test]
+fn vfp_vneg_f32() {
+    check_a32(".fpu vfpv3-d16\nvneg.f32 s0, s1", Cpu::CortexA7);
+}
+
+#[test]
+fn vfp_vneg_f64() {
+    check_a32(".fpu vfpv3-d16\nvneg.f64 d0, d1", Cpu::CortexA7);
+}
+
+#[test]
+fn vfp_vsqrt_f32() {
+    check_a32(".fpu vfpv3-d16\nvsqrt.f32 s0, s1", Cpu::CortexA7);
+}
+
+#[test]
+fn vfp_vsqrt_f64() {
+    check_a32(".fpu vfpv3-d16\nvsqrt.f64 d0, d1", Cpu::CortexA7);
+}
+
+#[test]
+fn vfp_vmov_reg_single() {
+    check_a32(".fpu vfpv3-d16\nvmov.f32 s0, s1", Cpu::CortexA7);
+    check_a32(".fpu vfpv3-d16\nvmov.f32 s31, s0", Cpu::CortexA7);
+}
+
+#[test]
+fn vfp_vmov_reg_double() {
+    check_a32(".fpu vfpv3-d16\nvmov.f64 d0, d1", Cpu::CortexA7);
+}
+
+#[test]
+fn vfp_vmov_imm_f32() {
+    check_a32(".fpu vfpv3-d16\nvmov.f32 s0, #1.0", Cpu::CortexA7);
+    check_a32(".fpu vfpv3-d16\nvmov.f32 s0, #-1.0", Cpu::CortexA7);
+    check_a32(".fpu vfpv3-d16\nvmov.f32 s0, #0.5", Cpu::CortexA7);
+}
+
+#[test]
+fn vfp_vmov_imm_f64() {
+    check_a32(".fpu vfpv3-d16\nvmov.f64 d0, #1.0", Cpu::CortexA7);
+    check_a32(".fpu vfpv3-d16\nvmov.f64 d0, #-1.0", Cpu::CortexA7);
+}
+
+#[test]
+fn vfp_vmov_core_to_single() {
+    check_a32(".fpu vfpv3-d16\nvmov s0, r0", Cpu::CortexA7);
+    check_a32(".fpu vfpv3-d16\nvmov s1, r3", Cpu::CortexA7);
+    check_a32(".fpu vfpv3-d16\nvmov s31, r7", Cpu::CortexA7);
+}
+
+#[test]
+fn vfp_vmov_single_to_core() {
+    check_a32(".fpu vfpv3-d16\nvmov r0, s0", Cpu::CortexA7);
+    check_a32(".fpu vfpv3-d16\nvmov r3, s1", Cpu::CortexA7);
+}
+
+#[test]
+fn vfp_vmov_core_pair_to_double() {
+    check_a32(".fpu vfpv3-d16\nvmov d0, r0, r1", Cpu::CortexA7);
+    check_a32(".fpu vfpv3-d16\nvmov d7, r2, r3", Cpu::CortexA7);
+}
+
+#[test]
+fn vfp_vmov_double_to_core_pair() {
+    check_a32(".fpu vfpv3-d16\nvmov r0, r1, d0", Cpu::CortexA7);
+    check_a32(".fpu vfpv3-d16\nvmov r2, r3, d7", Cpu::CortexA7);
+}
+
+#[test]
+fn vfp_vcmp_f32() {
+    check_a32(".fpu vfpv3-d16\nvcmp.f32 s0, s1", Cpu::CortexA7);
+    check_a32(".fpu vfpv3-d16\nvcmp.f32 s0, #0", Cpu::CortexA7);
+}
+
+#[test]
+fn vfp_vcmp_f64() {
+    check_a32(".fpu vfpv3-d16\nvcmp.f64 d0, d1", Cpu::CortexA7);
+    check_a32(".fpu vfpv3-d16\nvcmp.f64 d0, #0", Cpu::CortexA7);
+}
+
+#[test]
+fn vfp_vcmpe_f32() {
+    check_a32(".fpu vfpv3-d16\nvcmpe.f32 s0, s1", Cpu::CortexA7);
+    check_a32(".fpu vfpv3-d16\nvcmpe.f32 s0, #0", Cpu::CortexA7);
+}
+
+#[test]
+fn vfp_vcmpe_f64() {
+    check_a32(".fpu vfpv3-d16\nvcmpe.f64 d0, d1", Cpu::CortexA7);
+    check_a32(".fpu vfpv3-d16\nvcmpe.f64 d0, #0", Cpu::CortexA7);
+}
+
+#[test]
+fn vfp_vcvt_f32_f64() {
+    check_a32(".fpu vfpv3-d16\nvcvt.f64.f32 d0, s1", Cpu::CortexA7);
+    check_a32(".fpu vfpv3-d16\nvcvt.f32.f64 s0, d1", Cpu::CortexA7);
+}
+
+#[test]
+fn vfp_vcvt_int_float() {
+    check_a32(".fpu vfpv3-d16\nvcvt.f32.s32 s0, s1", Cpu::CortexA7);
+    check_a32(".fpu vfpv3-d16\nvcvt.f32.u32 s0, s1", Cpu::CortexA7);
+    check_a32(".fpu vfpv3-d16\nvcvt.f64.s32 d0, s1", Cpu::CortexA7);
+    check_a32(".fpu vfpv3-d16\nvcvt.f64.u32 d0, s1", Cpu::CortexA7);
+}
+
+#[test]
+fn vfp_vcvt_float_int() {
+    check_a32(".fpu vfpv3-d16\nvcvt.s32.f32 s0, s1", Cpu::CortexA7);
+    check_a32(".fpu vfpv3-d16\nvcvt.u32.f32 s0, s1", Cpu::CortexA7);
+    check_a32(".fpu vfpv3-d16\nvcvt.s32.f64 s0, d1", Cpu::CortexA7);
+    check_a32(".fpu vfpv3-d16\nvcvt.u32.f64 s0, d1", Cpu::CortexA7);
+}
+
+#[test]
+fn vfp_vcvtr() {
+    check_a32(".fpu vfpv3-d16\nvcvtr.s32.f32 s0, s1", Cpu::CortexA7);
+    check_a32(".fpu vfpv3-d16\nvcvtr.u32.f32 s0, s1", Cpu::CortexA7);
+    check_a32(".fpu vfpv3-d16\nvcvtr.s32.f64 s0, d1", Cpu::CortexA7);
+    check_a32(".fpu vfpv3-d16\nvcvtr.u32.f64 s0, d1", Cpu::CortexA7);
+}
+
+#[test]
+fn vfp_vldr_f32() {
+    check_a32(".fpu vfpv3-d16\nvldr s0, [r0]", Cpu::CortexA7);
+    check_a32(".fpu vfpv3-d16\nvldr s0, [r0, #4]", Cpu::CortexA7);
+    check_a32(".fpu vfpv3-d16\nvldr s0, [r0, #-4]", Cpu::CortexA7);
+    check_a32(".fpu vfpv3-d16\nvldr s0, [r0, #1020]", Cpu::CortexA7);
+}
+
+#[test]
+fn vfp_vldr_f64() {
+    check_a32(".fpu vfpv3-d16\nvldr d0, [r0]", Cpu::CortexA7);
+    check_a32(".fpu vfpv3-d16\nvldr d0, [r0, #8]", Cpu::CortexA7);
+    check_a32(".fpu vfpv3-d16\nvldr d0, [r0, #-8]", Cpu::CortexA7);
+}
+
+#[test]
+fn vfp_vstr_f32() {
+    check_a32(".fpu vfpv3-d16\nvstr s0, [r0]", Cpu::CortexA7);
+    check_a32(".fpu vfpv3-d16\nvstr s0, [r0, #4]", Cpu::CortexA7);
+}
+
+#[test]
+fn vfp_vstr_f64() {
+    check_a32(".fpu vfpv3-d16\nvstr d0, [r0]", Cpu::CortexA7);
+    check_a32(".fpu vfpv3-d16\nvstr d0, [r0, #8]", Cpu::CortexA7);
+}
+
+#[test]
+fn vfp_vpush_single() {
+    check_a32(".fpu vfpv3-d16\nvpush {s0}", Cpu::CortexA7);
+    check_a32(".fpu vfpv3-d16\nvpush {s0-s3}", Cpu::CortexA7);
+    check_a32(".fpu vfpv3-d16\nvpush {s16-s31}", Cpu::CortexA7);
+}
+
+#[test]
+fn vfp_vpush_double() {
+    check_a32(".fpu vfpv3-d16\nvpush {d0}", Cpu::CortexA7);
+    check_a32(".fpu vfpv3-d16\nvpush {d0-d7}", Cpu::CortexA7);
+    check_a32(".fpu vfpv3-d16\nvpush {d8-d15}", Cpu::CortexA7);
+}
+
+#[test]
+fn vfp_vpop_single() {
+    check_a32(".fpu vfpv3-d16\nvpop {s0}", Cpu::CortexA7);
+    check_a32(".fpu vfpv3-d16\nvpop {s0-s3}", Cpu::CortexA7);
+}
+
+#[test]
+fn vfp_vpop_double() {
+    check_a32(".fpu vfpv3-d16\nvpop {d0}", Cpu::CortexA7);
+    check_a32(".fpu vfpv3-d16\nvpop {d0-d7}", Cpu::CortexA7);
+}
+
+#[test]
+fn vfp_vmrs() {
+    check_a32(".fpu vfpv3-d16\nvmrs r0, fpscr", Cpu::CortexA7);
+    check_a32(".fpu vfpv3-d16\nvmrs APSR_nzcv, fpscr", Cpu::CortexA7);
+}
+
+#[test]
+fn vfp_vmsr() {
+    check_a32(".fpu vfpv3-d16\nvmsr fpscr, r0", Cpu::CortexA7);
+    check_a32(".fpu vfpv3-d16\nvmsr fpscr, r3", Cpu::CortexA7);
+}
+
+#[test]
+fn vfp_conditional() {
+    check_a32(".fpu vfpv3-d16\nvaddeq.f32 s0, s1, s2", Cpu::CortexA7);
+    check_a32(".fpu vfpv3-d16\nvsubne.f64 d0, d1, d2", Cpu::CortexA7);
+}

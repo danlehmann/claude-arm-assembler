@@ -1007,6 +1007,14 @@ fn is_always_t2(m: Mnemonic) -> bool {
             | Uxtb16
             | Cpsie
             | Cpsid
+            // VFP (always 32-bit)
+            | Vadd | Vsub | Vmul | Vdiv
+            | Vsqrt | Vabs | Vneg
+            | Vmov | Vcmp | Vcmpe
+            | Vcvt | Vcvtr
+            | Vldr | Vstr
+            | Vpush | Vpop
+            | Vmrs | Vmsr
             | Ldmdb
             | Stmdb
             | Stmfd

@@ -1,5 +1,6 @@
 mod a32;
 mod thumb;
+mod vfp;
 
 use std::collections::HashMap;
 
@@ -193,6 +194,14 @@ fn instruction_size(inst: &Instruction, isa: Isa) -> u32 {
                 | Mnemonic::Ldrsbt | Mnemonic::Ldrsht
                 | Mnemonic::Pld | Mnemonic::Pldw | Mnemonic::Pli
                 | Mnemonic::Dbg | Mnemonic::Rrx
+                // VFP (always 32-bit)
+                | Mnemonic::Vadd | Mnemonic::Vsub | Mnemonic::Vmul | Mnemonic::Vdiv
+                | Mnemonic::Vsqrt | Mnemonic::Vabs | Mnemonic::Vneg
+                | Mnemonic::Vmov | Mnemonic::Vcmp | Mnemonic::Vcmpe
+                | Mnemonic::Vcvt | Mnemonic::Vcvtr
+                | Mnemonic::Vldr | Mnemonic::Vstr
+                | Mnemonic::Vpush | Mnemonic::Vpop
+                | Mnemonic::Vmrs | Mnemonic::Vmsr
                 // DSP multiply (always 32-bit)
                 | Mnemonic::Smmul | Mnemonic::Smmulr
                 | Mnemonic::Smmla | Mnemonic::Smmlar
@@ -416,6 +425,10 @@ fn encode_instruction(
     local_labels: &HashMap<u32, Vec<(usize, u32)>>,
     section: usize,
 ) -> Result<EncodedInst, AsmError> {
+    // VFP instructions share the same encoding for A32 and Thumb-2
+    if vfp::is_vfp(inst.mnemonic) {
+        return vfp::encode_vfp(inst, isa, offset, symbols, equs, local_labels, section);
+    }
     match isa {
         Isa::Thumb => thumb::encode_thumb(inst, offset, symbols, equs, local_labels, section),
         Isa::A32 => a32::encode_a32(inst, offset, symbols, equs, local_labels, section),
