@@ -796,6 +796,10 @@ pub fn thumb_instruction_size(inst: &Instruction) -> u32 {
             [Operand::Reg(rd), Operand::Reg(rm)] if rd.value() > 7 || rm.value() > 7 => 4,
             _ => 2,
         },
+        Adr => match inst.operands.as_slice() {
+            [Operand::Reg(rd), _] if rd.value() > 7 => 4,
+            _ => 2,
+        },
         _ => 2,
     }
 }
@@ -850,7 +854,19 @@ pub fn encode_thumb(
         Blx => encode_blx(inst),
         Nop => Ok(emit16(0xBF00)),
         Svc => encode_svc(inst),
-        Adr => encode_adr(inst, offset, symbols, equs, local_labels, section),
+        Adr => {
+            let result = encode_adr(inst, offset, symbols, equs, local_labels, section);
+            // If narrow ADR failed for a low register, don't fall through to wide
+            // (size was predicted as 2 bytes, wide would produce 4)
+            if result.is_err() {
+                if let [Operand::Reg(rd), _] = inst.operands.as_slice() {
+                    if rd.value() <= 7 {
+                        return result;
+                    }
+                }
+            }
+            result
+        }
         Rev | Rev16 | Revsh | Sxth | Sxtb | Uxth | Uxtb => encode_misc_thumb(inst),
         Wfi => Ok(emit16(0xBF30)),
         Wfe => Ok(emit16(0xBF20)),
@@ -874,7 +890,7 @@ pub fn encode_thumb(
     match narrow {
         Ok(bytes) => Ok(bytes),
         Err(e) => {
-            // Instructions with no wide form: propagate error directly
+            // Instructions where narrow failure should not fall through to wide
             if matches!(inst.mnemonic, Cbz | Cbnz | It | Bkpt) {
                 return Err(e);
             }
@@ -1110,6 +1126,7 @@ fn encode_thumb_wide(
         }
         Cpsie | Cpsid => encode_t2_cps(inst),
         Pld | Pli => encode_t2_preload(inst),
+        Adr => encode_adr_wide(inst, offset, symbols, equs, local_labels, section),
         _ => Err(AsmError::new(
             inst.line,
             format!("{:?} not supported in Thumb mode", inst.mnemonic),
@@ -2026,10 +2043,11 @@ fn encode_adr(
             let target = resolve_expr_u32(expr, symbols, equs, local_labels, section, offset, line)?;
             let pc = (offset + 4) & !3;
             let disp = target.wrapping_sub(pc);
-            if disp % 4 != 0 || disp > 1020 {
+            let signed_disp = target as i32 - pc as i32;
+            if signed_disp < 0 || disp % 4 != 0 || disp > 1020 {
                 return Err(AsmError::new(
                     line,
-                    "ADR: offset out of range (0..1020, word-aligned)",
+                    "ADR: offset out of narrow range; use ADR.W for backward or far labels",
                 ));
             }
             let hw = LoadAddr::ZERO
@@ -2040,6 +2058,39 @@ fn encode_adr(
         }
         _ => Err(AsmError::new(line, "ADR requires low register and label")),
     }
+}
+
+fn encode_adr_wide(
+    inst: &Instruction,
+    offset: u32,
+    symbols: &HashMap<String, (usize, u32)>,
+    equs: &HashMap<String, i64>,
+    local_labels: &HashMap<u32, Vec<(usize, u32)>>,
+    section: usize,
+) -> Result<EncodedInst, AsmError> {
+    let line = inst.line;
+    let (rd, expr) = match inst.operands.as_slice() {
+        [Operand::Reg(rd), Operand::Expr(expr)] => (*rd, expr),
+        _ => return Err(AsmError::new(line, "ADR: need Rd, label")),
+    };
+    let target = resolve_expr_u32(expr, symbols, equs, local_labels, section, offset, line)?;
+    let pc = (offset + 4) & !3; // Thumb PC is word-aligned
+    let disp = target as i32 - pc as i32;
+    let (hw1_base, abs_disp) = if disp >= 0 {
+        (0xF20Fu16, disp as u32) // ADDW Rd, PC, #imm12
+    } else {
+        (0xF2AFu16, (-disp) as u32) // SUBW Rd, PC, #imm12
+    };
+    if abs_disp > 4095 {
+        return Err(AsmError::new(line, "ADR.W: offset out of range (±4095)"));
+    }
+    // imm12 split: i (bit 11), imm3 (bits 10:8), imm8 (bits 7:0)
+    let i = (abs_disp >> 11) & 1;
+    let imm3 = (abs_disp >> 8) & 0x7;
+    let imm8 = abs_disp & 0xFF;
+    let hw1 = hw1_base | (i as u16) << 10;
+    let hw2 = (imm3 << 12) | ((rd.value() as u32) << 8) | imm8;
+    Ok(emit32_thumb(hw1, hw2 as u16))
 }
 
 fn encode_bkpt(inst: &Instruction) -> Result<EncodedInst, AsmError> {

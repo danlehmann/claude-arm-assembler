@@ -1172,6 +1172,27 @@ fn a32_adr_backward() {
 }
 
 #[test]
+fn thumb_adr_forward() {
+    check_thumb("adr r0, label\nnop\nlabel:\nnop", Cpu::CortexM4);
+}
+
+#[test]
+fn thumb_adr_backward() {
+    // Backward ADR requires .w suffix (no relaxation pass)
+    check_thumb("label:\nnop\nadr.w r0, label", Cpu::CortexM4);
+}
+
+#[test]
+fn thumb_adr_wide_forward() {
+    check_thumb("adr.w r0, label\nnop\nlabel:\nnop", Cpu::CortexM4);
+}
+
+#[test]
+fn thumb_adr_high_reg() {
+    check_thumb("adr r8, label\nnop\nlabel:\nnop", Cpu::CortexM4);
+}
+
+#[test]
 fn a32_conditional_blx_reg() {
     check_a32("blxne r5", Cpu::CortexA7);
 }
