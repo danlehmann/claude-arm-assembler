@@ -864,6 +864,8 @@ pub fn encode_thumb(
                         return result;
                     }
                 }
+                // High register: use wide encoding
+                return encode_adr_wide(inst, offset, symbols, equs, local_labels, section);
             }
             result
         }

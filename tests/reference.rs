@@ -1190,6 +1190,13 @@ fn thumb_adr_wide_forward() {
 #[test]
 fn thumb_adr_high_reg() {
     check_thumb("adr r8, label\nnop\nlabel:\nnop", Cpu::CortexM4);
+    check_thumb("adr r12, label\nnop\nlabel:\nnop", Cpu::CortexM4);
+}
+
+#[test]
+fn thumb_adr_high_reg_backward() {
+    check_thumb("label:\nnop\nadr r12, label", Cpu::CortexM4);
+    check_thumb("label:\nnop\nadr r8, label", Cpu::CortexM4);
 }
 
 #[test]
