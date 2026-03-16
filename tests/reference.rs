@@ -3012,3 +3012,20 @@ fn vfp_conditional() {
     check_a32(".fpu vfpv3-d16\nvaddeq.f32 s0, s1, s2", Cpu::CortexA7);
     check_a32(".fpu vfpv3-d16\nvsubne.f64 d0, d1, d2", Cpu::CortexA7);
 }
+
+// ---------------------------------------------------------------------------
+// Local label 0b/0f (disambiguate from binary literal prefix)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn local_label_zero_backward() {
+    // 0b must be parsed as local label 0 backward, not binary literal prefix
+    check_a32("0:\nmov r0, pc\nadr r1, 0b", Cpu::CortexA7);
+    check_thumb("0:\nmov r0, pc\nadr.w r1, 0b", Cpu::CortexM4);
+}
+
+#[test]
+fn local_label_zero_forward() {
+    check_a32("adr r0, 0f\n0: nop", Cpu::CortexA7);
+    check_thumb("adr.w r0, 0f\n0: nop", Cpu::CortexM4);
+}

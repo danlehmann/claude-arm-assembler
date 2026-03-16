@@ -153,7 +153,10 @@ pub fn tokenize(input: &str) -> Result<Vec<Token>, AsmError> {
                         line,
                     });
                     continue;
-                } else if next == 'b' {
+                } else if next == 'b'
+                    && i + 2 < chars.len()
+                    && (chars[i + 2] == '0' || chars[i + 2] == '1')
+                {
                     i += 2;
                     while i < chars.len() && (chars[i] == '0' || chars[i] == '1') {
                         i += 1;
