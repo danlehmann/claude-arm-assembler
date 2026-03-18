@@ -728,6 +728,8 @@ pub enum Operand {
     Fpscr,
     /// FP immediate (8-bit encoded float)
     FpImm(f64),
+    /// Literal pool reference: `ldr Rd, =expr`
+    Pool(Expr),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -763,6 +765,7 @@ pub enum Directive {
     Equ(String, Expr),
     Type(String, String),
     Fpu(String),
+    Pool,
 }
 
 #[derive(Debug, Clone, PartialEq)]

@@ -321,6 +321,7 @@ impl<'a> Parser<'a> {
                 }
                 Ok(Directive::Fpu(name))
             }
+            ".pool" | ".ltorg" => Ok(Directive::Pool),
             ".thumb_func" | ".fnstart" | ".fnend" | ".cantunwind" | ".size" | ".ident"
             | ".file" => {
                 // Skip to end of line (ignore these directives)
@@ -565,6 +566,11 @@ impl<'a> Parser<'a> {
         match self.peek_kind().clone() {
             TokenKind::LBrace => self.parse_reglist(),
             TokenKind::LBracket => self.parse_memory(),
+            TokenKind::Eq => {
+                self.advance();
+                let expr = self.parse_full_expr()?;
+                Ok(Operand::Pool(expr))
+            }
             TokenKind::Hash => {
                 self.advance();
                 let val = self.parse_number()?;

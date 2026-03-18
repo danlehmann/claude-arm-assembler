@@ -38,6 +38,27 @@ struct AsmState {
     equs: HashMap<String, i64>,
     /// Local (numeric) labels: number → sorted list of (section_index, offset).
     local_labels: HashMap<u32, Vec<(usize, u32)>>,
+    /// Pending literal pool entries not yet flushed.
+    pending_pool: Vec<PendingPoolEntry>,
+    /// Maps (section_index, ldr_instruction_offset) → pool_word_offset.
+    pool_map: HashMap<(usize, u32), u32>,
+    /// Flushed pools ready for pass2 emission.
+    pool_emissions: Vec<PoolEmission>,
+    /// Index into pool_emissions for pass2 iteration.
+    next_pool_emission: usize,
+}
+
+struct PendingPoolEntry {
+    expr: Expr,
+    line: usize,
+    section: usize,
+    ldr_offset: u32,
+}
+
+struct PoolEmission {
+    section: usize,
+    padding: u32,
+    entries: Vec<(Expr, usize, u32)>, // (expr, line, ldr_offset for label resolution)
 }
 
 struct SectionBuilder {
@@ -65,6 +86,10 @@ pub fn assemble(stmts: &[Statement], config: &AsmConfig) -> Result<AsmOutput, As
         globals: Vec::new(),
         equs: HashMap::new(),
         local_labels: HashMap::new(),
+        pending_pool: Vec::new(),
+        pool_map: HashMap::new(),
+        pool_emissions: Vec::new(),
+        next_pool_emission: 0,
     };
 
     // Pass 1: collect labels, compute sizes
@@ -76,6 +101,7 @@ pub fn assemble(stmts: &[Statement], config: &AsmConfig) -> Result<AsmOutput, As
     }
     state.current_section = 0;
     state.isa = config.default_isa;
+    state.next_pool_emission = 0;
 
     // Pass 2: encode
     pass2(stmts, &mut state)?;
@@ -129,6 +155,17 @@ fn pass1(stmts: &[Statement], state: &mut AsmState) -> Result<(), AsmError> {
                 }
             }
             Statement::Instruction(inst) => {
+                // Register literal pool entries before computing size
+                if let [_, Operand::Pool(expr)] = inst.operands.as_slice() {
+                    let sec = state.current_section;
+                    let offset = state.sections[sec].offset;
+                    state.pending_pool.push(PendingPoolEntry {
+                        expr: expr.clone(),
+                        line: inst.line,
+                        section: sec,
+                        ldr_offset: offset,
+                    });
+                }
                 let size = instruction_size(inst, state.isa);
                 state.sections[state.current_section].offset += size;
             }
@@ -137,7 +174,43 @@ fn pass1(stmts: &[Statement], state: &mut AsmState) -> Result<(), AsmError> {
             }
         }
     }
+    // Auto-flush remaining pool entries at end of assembly
+    flush_pool(state);
     Ok(())
+}
+
+/// Flush pending literal pool entries, assigning offsets and recording for pass2.
+fn flush_pool(state: &mut AsmState) {
+    if state.pending_pool.is_empty() {
+        return;
+    }
+    let sec_idx = state.current_section;
+    let sec_offset = &mut state.sections[sec_idx].offset;
+
+    // Align pool to 4 bytes
+    let padding = (4 - (*sec_offset % 4)) % 4;
+    *sec_offset += padding;
+
+    let base = *sec_offset;
+    let entries: Vec<(Expr, usize, u32)> = state
+        .pending_pool
+        .drain(..)
+        .enumerate()
+        .map(|(i, entry)| {
+            let pool_word_offset = base + (i as u32) * 4;
+            state
+                .pool_map
+                .insert((entry.section, entry.ldr_offset), pool_word_offset);
+            (entry.expr, entry.line, entry.ldr_offset)
+        })
+        .collect();
+
+    *sec_offset += (entries.len() as u32) * 4;
+    state.pool_emissions.push(PoolEmission {
+        section: sec_idx,
+        padding,
+        entries,
+    });
 }
 
 fn pass2(stmts: &[Statement], state: &mut AsmState) -> Result<(), AsmError> {
@@ -146,7 +219,7 @@ fn pass2(stmts: &[Statement], state: &mut AsmState) -> Result<(), AsmError> {
             Statement::Label(_, _) => {}
             Statement::Instruction(inst) => {
                 let offset = state.sections[state.current_section].offset;
-                let enc = encode_instruction(inst, state.isa, offset, &state.symbols, &state.equs, &state.local_labels, state.current_section)?;
+                let enc = encode_instruction(inst, state.isa, offset, &state.symbols, &state.equs, &state.local_labels, state.current_section, &state.pool_map)?;
                 debug_assert_eq!(
                     enc.len(),
                     instruction_size(inst, state.isa),
@@ -162,6 +235,49 @@ fn pass2(stmts: &[Statement], state: &mut AsmState) -> Result<(), AsmError> {
             Statement::Directive(dir, line) => {
                 handle_directive_pass2(dir, *line, state)?;
             }
+        }
+    }
+    // Emit any remaining pools at end of assembly
+    emit_pool(state)?;
+    Ok(())
+}
+
+/// Emit the next pending pool emission in pass2.
+fn emit_pool(state: &mut AsmState) -> Result<(), AsmError> {
+    while state.next_pool_emission < state.pool_emissions.len() {
+        let emission = &state.pool_emissions[state.next_pool_emission];
+        if emission.section != state.current_section {
+            break;
+        }
+        // Clone data to avoid borrow conflict
+        let padding = emission.padding;
+        let entries: Vec<(Expr, usize, u32)> = emission.entries.clone();
+        let sec_idx = emission.section;
+        state.next_pool_emission += 1;
+
+        // Emit alignment padding
+        let sec = &mut state.sections[sec_idx];
+        for _ in 0..padding {
+            sec.data.push(0);
+        }
+        sec.offset += padding;
+
+        // Emit pool words
+        for (expr, line, ldr_offset) in &entries {
+            // Resolve expression at the LDR instruction's offset (not the pool word's offset)
+            // so that local label forward/backward references work correctly
+            let val = resolve_expr(
+                expr,
+                &state.symbols,
+                &state.equs,
+                &state.local_labels,
+                sec_idx,
+                *ldr_offset,
+                *line,
+            )?;
+            let sec = &mut state.sections[sec_idx];
+            sec.data.extend_from_slice(&(val as u32).to_le_bytes());
+            sec.offset += 4;
         }
     }
     Ok(())
@@ -259,6 +375,8 @@ fn instruction_size(inst: &Instruction, isa: Isa) -> u32 {
 fn handle_directive_pass1(dir: &Directive, state: &mut AsmState) -> Result<(), AsmError> {
     match dir {
         Directive::Section(name) => {
+            // Flush pool before switching sections
+            flush_pool(state);
             if let Some(idx) = state.sections.iter().position(|s| s.name == *name) {
                 state.current_section = idx;
             } else {
@@ -310,6 +428,9 @@ fn handle_directive_pass1(dir: &Directive, state: &mut AsmState) -> Result<(), A
                 state.equs.insert(name.clone(), v);
             }
         }
+        Directive::Pool => {
+            flush_pool(state);
+        }
         Directive::SyntaxUnified | Directive::Type(_, _) | Directive::Fpu(_) => {}
     }
     Ok(())
@@ -318,6 +439,8 @@ fn handle_directive_pass1(dir: &Directive, state: &mut AsmState) -> Result<(), A
 fn handle_directive_pass2(dir: &Directive, line: usize, state: &mut AsmState) -> Result<(), AsmError> {
     match dir {
         Directive::Section(name) => {
+            // Emit pool before switching sections
+            emit_pool(state)?;
             if let Some(idx) = state.sections.iter().position(|s| s.name == *name) {
                 state.current_section = idx;
             }
@@ -397,6 +520,9 @@ fn handle_directive_pass2(dir: &Directive, line: usize, state: &mut AsmState) ->
             let resolved = resolve_expr(val, &state.symbols, &state.equs, &state.local_labels, state.current_section, offset, line)?;
             state.equs.insert(name.clone(), resolved);
         }
+        Directive::Pool => {
+            emit_pool(state)?;
+        }
         Directive::SyntaxUnified | Directive::Type(_, _) | Directive::Global(_)
         | Directive::Fpu(_) => {}
     }
@@ -417,6 +543,33 @@ pub fn resolve_expr_u32(
 }
 
 fn encode_instruction(
+    inst: &Instruction,
+    isa: Isa,
+    offset: u32,
+    symbols: &HashMap<String, (usize, u32)>,
+    equs: &HashMap<String, i64>,
+    local_labels: &HashMap<u32, Vec<(usize, u32)>>,
+    section: usize,
+    pool_map: &HashMap<(usize, u32), u32>,
+) -> Result<EncodedInst, AsmError> {
+    // Handle LDR =expr (literal pool pseudo-instruction)
+    if let [Operand::Reg(rt), Operand::Pool(_)] = inst.operands.as_slice() {
+        let pool_word_offset = *pool_map
+            .get(&(section, offset))
+            .ok_or_else(|| AsmError::new(inst.line, "internal error: pool entry not found"))?;
+        // Rewrite as LDR Rt, <pool_address> (PC-relative) using the existing Expr path
+        let mut rewritten = inst.clone();
+        rewritten.operands[1] = Operand::Expr(Expr::Num(pool_word_offset as i64));
+        // Force wide in Thumb only for high registers (low regs use narrow 2-byte encoding)
+        if isa == Isa::Thumb && rt.value() > 7 {
+            rewritten.wide = true;
+        }
+        return encode_instruction_inner(&rewritten, isa, offset, symbols, equs, local_labels, section);
+    }
+    encode_instruction_inner(inst, isa, offset, symbols, equs, local_labels, section)
+}
+
+fn encode_instruction_inner(
     inst: &Instruction,
     isa: Isa,
     offset: u32,

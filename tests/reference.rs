@@ -3029,3 +3029,88 @@ fn local_label_zero_forward() {
     check_a32("adr r0, 0f\n0: nop", Cpu::CortexA7);
     check_thumb("adr.w r0, 0f\n0: nop", Cpu::CortexM4);
 }
+
+// ---------------------------------------------------------------------------
+// Literal pool (LDR Rd, =expr)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn ldr_pool_constant_a32() {
+    check_a32("ldr r0, =0x12345678\n.pool", Cpu::CortexA7);
+}
+
+#[test]
+fn ldr_pool_constant_thumb() {
+    check_thumb("ldr r0, =0x12345678\n.pool", Cpu::CortexM4);
+}
+
+#[test]
+fn ldr_pool_local_label_a32() {
+    check_a32("ldr r0, =1f\nb 2f\n1: nop\n2:\n.pool", Cpu::CortexA7);
+}
+
+#[test]
+fn ldr_pool_local_label_thumb() {
+    check_thumb("ldr r0, =1f\nb 2f\n1: nop\n2:\n.pool", Cpu::CortexM4);
+}
+
+#[test]
+fn ldr_pool_symbol_a32() {
+    check_a32("ldr r0, =mydata\nnop\nmydata: .word 42\n.pool", Cpu::CortexA7);
+}
+
+#[test]
+fn ldr_pool_auto_flush_a32() {
+    // Pool auto-flushed at end of section (no explicit .pool)
+    check_a32("ldr r0, =0xDEADBEEF", Cpu::CortexA7);
+}
+
+#[test]
+fn ldr_pool_auto_flush_thumb() {
+    check_thumb("ldr r0, =0xDEADBEEF", Cpu::CortexM4);
+}
+
+#[test]
+fn ldr_pool_multiple_a32() {
+    check_a32("ldr r0, =0x11111111\nldr r1, =0x22222222\n.pool", Cpu::CortexA7);
+}
+
+#[test]
+fn ldr_pool_conditional_a32() {
+    check_a32("ldreq r0, =0xABCD0000\n.pool", Cpu::CortexA7);
+}
+
+#[test]
+fn ldr_pool_with_adr_a32() {
+    // User's original snippet pattern: ldr + adr + branch + labels
+    check_a32(
+        "ldr r0, =1f\nadr r1, 1f\nb 2f\n1: nop\n2:\n.pool",
+        Cpu::CortexA7,
+    );
+}
+
+#[test]
+fn ldr_pool_with_adr_thumb() {
+    check_thumb(
+        "ldr r0, =1f\nadr.w r1, 1f\nb 2f\n1: nop\n2:\n.pool",
+        Cpu::CortexM4,
+    );
+}
+
+#[test]
+fn ldr_pool_high_reg_thumb() {
+    // High register → wide encoding in Thumb
+    check_thumb("ldr r8, =0x12345678\n.pool", Cpu::CortexM4);
+}
+
+#[test]
+fn ldr_pool_large_const_a32() {
+    // Constant that can't be expressed as MOV/MVN modified immediate
+    check_a32("ldr r0, =0x12340000\n.pool", Cpu::CortexA7);
+}
+
+#[test]
+fn ldr_pool_ltorg_a32() {
+    // .ltorg is an alias for .pool
+    check_a32("ldr r0, =0xFF00FF00\n.ltorg", Cpu::CortexA7);
+}

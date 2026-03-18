@@ -709,6 +709,9 @@ pub fn thumb_instruction_size(inst: &Instruction) -> u32 {
             }
         }
         Ldr | Str | Ldrb | Strb | Ldrh | Strh => match inst.operands.as_slice() {
+            // Pool reference: narrow for low regs, wide for high regs
+            [Operand::Reg(rt), Operand::Pool(_)] if rt.value() <= 7 => 2,
+            [Operand::Reg(_), Operand::Pool(_)] => 4,
             [Operand::Reg(rt), Operand::Memory {
                 base,
                 offset: MemOffset::Imm(imm),

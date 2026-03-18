@@ -980,7 +980,7 @@ fn encode_ldr_a32(
             let target = resolve_expr_u32(expr, symbols, equs, local_labels, section, offset, line)?;
             let pc = offset + 8; // ARM PC = current + 8
             let disp = target as i32 - pc as i32;
-            let (add, abs_disp) = if disp >= 0 {
+            let (add, abs_disp) = if disp > 0 {
                 (true, disp as u32)
             } else {
                 (false, (-disp) as u32)

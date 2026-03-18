@@ -19,6 +19,7 @@ pub enum TokenKind {
     LParen,
     RParen,
     Bang,
+    Eq,
     Newline,
     Eof,
 }
@@ -202,6 +203,7 @@ pub fn tokenize(input: &str) -> Result<Vec<Token>, AsmError> {
             '(' => TokenKind::LParen,
             ')' => TokenKind::RParen,
             '!' => TokenKind::Bang,
+            '=' => TokenKind::Eq,
             _ => return Err(AsmError::new(line, format!("unexpected character: '{ch}'"))),
         };
         tokens.push(Token { kind, line });
