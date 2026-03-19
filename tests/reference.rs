@@ -3114,3 +3114,112 @@ fn ldr_pool_ltorg_a32() {
     // .ltorg is an alias for .pool
     check_a32("ldr r0, =0xFF00FF00\n.ltorg", Cpu::CortexA7);
 }
+
+#[test]
+fn thumb_ldrex_add_strex_sequence() {
+    let src = "\
+        ldrex r1, [r0]
+        add r1, r1, #10
+        strex r2, r1, [r0]
+    ";
+    check_thumb(src, Cpu::CortexM4);
+}
+
+#[test]
+fn a32_ldrex_add_strex_sequence() {
+    let src = "\
+        ldrex r1, [r0]
+        add r1, r1, #10
+        strex r2, r1, [r0]
+    ";
+    check_a32(src, Cpu::CortexA7);
+}
+
+// --- Thumb narrow vs wide: set_flags correctness ---
+// In unified syntax, narrow Thumb data-processing encodings implicitly set flags.
+// Instructions without S suffix must use wide encoding (except inside IT blocks).
+
+#[test]
+fn thumb_add_no_s_uses_wide() {
+    // add (no S) with low regs and small imm must use wide encoding
+    check_thumb("add r0, r1, #3", Cpu::CortexM4);
+    check_thumb("add r2, r2, #100", Cpu::CortexM4);
+    check_thumb("add r0, r1, r2", Cpu::CortexM4);
+}
+
+#[test]
+fn thumb_adds_uses_narrow() {
+    // adds (with S) should use narrow encoding when possible
+    check_thumb("adds r0, r1, #3", Cpu::CortexM4);
+    check_thumb("adds r2, r2, #100", Cpu::CortexM4);
+    check_thumb("adds r2, #200", Cpu::CortexM4);
+    check_thumb("adds r0, r1, r2", Cpu::CortexM4);
+}
+
+#[test]
+fn thumb_sub_no_s_uses_wide() {
+    check_thumb("sub r0, r1, #3", Cpu::CortexM4);
+    check_thumb("sub r2, r2, #100", Cpu::CortexM4);
+    check_thumb("sub r0, r1, r2", Cpu::CortexM4);
+}
+
+#[test]
+fn thumb_subs_uses_narrow() {
+    check_thumb("subs r0, r1, #3", Cpu::CortexM4);
+    check_thumb("subs r2, r2, #100", Cpu::CortexM4);
+    check_thumb("subs r0, r1, r2", Cpu::CortexM4);
+}
+
+#[test]
+fn thumb_alu_no_s_uses_wide() {
+    check_thumb("and r0, r0, r1", Cpu::CortexM4);
+    check_thumb("orr r0, r0, r1", Cpu::CortexM4);
+    check_thumb("eor r0, r0, r1", Cpu::CortexM4);
+    check_thumb("bic r0, r0, r1", Cpu::CortexM4);
+    check_thumb("adc r0, r0, r1", Cpu::CortexM4);
+    check_thumb("sbc r0, r0, r1", Cpu::CortexM4);
+}
+
+#[test]
+fn thumb_alu_with_s_uses_narrow() {
+    check_thumb("ands r0, r0, r1", Cpu::CortexM4);
+    check_thumb("orrs r0, r0, r1", Cpu::CortexM4);
+    check_thumb("eors r0, r0, r1", Cpu::CortexM4);
+    check_thumb("bics r0, r0, r1", Cpu::CortexM4);
+    check_thumb("adcs r0, r0, r1", Cpu::CortexM4);
+    check_thumb("sbcs r0, r0, r1", Cpu::CortexM4);
+}
+
+#[test]
+fn thumb_shift_no_s_uses_wide() {
+    check_thumb("lsl r0, r1, #4", Cpu::CortexM4);
+    check_thumb("lsr r0, r1, #4", Cpu::CortexM4);
+    check_thumb("asr r0, r1, #4", Cpu::CortexM4);
+}
+
+#[test]
+fn thumb_shift_with_s_uses_narrow() {
+    check_thumb("lsls r0, r1, #4", Cpu::CortexM4);
+    check_thumb("lsrs r0, r1, #4", Cpu::CortexM4);
+    check_thumb("asrs r0, r1, #4", Cpu::CortexM4);
+}
+
+#[test]
+fn thumb_mov_no_s_imm_uses_wide() {
+    check_thumb("mov r0, #42", Cpu::CortexM4);
+}
+
+#[test]
+fn thumb_movs_imm_uses_narrow() {
+    check_thumb("movs r0, #42", Cpu::CortexM4);
+}
+
+#[test]
+fn thumb_neg_no_s_uses_wide() {
+    check_thumb("neg r0, r1", Cpu::CortexM4);
+}
+
+#[test]
+fn thumb_negs_uses_narrow() {
+    check_thumb("negs r0, r1", Cpu::CortexM4);
+}

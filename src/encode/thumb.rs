@@ -634,10 +634,11 @@ pub fn thumb_instruction_size(inst: &Instruction) -> u32 {
                 {
                     4
                 }
-                // MOV Rd, #imm without S flag (outside IT): narrow sets flags, need wide
+                // Rd, #imm without S flag (outside IT): narrow sets flags, need wide
+                // Applies to MOV, ADD, SUB, ADC, SBC (not CMP which always sets flags)
                 [Operand::Reg(rd), Operand::Imm(_)]
-                    if matches!(inst.mnemonic, Mov)
-                        && !inst.set_flags
+                    if !inst.set_flags
+                        && !matches!(inst.mnemonic, Cmp | Cmn | Tst)
                         && inst.condition.is_none()
                         && rd.value() <= 7 =>
                 {
@@ -665,7 +666,12 @@ pub fn thumb_instruction_size(inst: &Instruction) -> u32 {
                             } else {
                                 4
                             }
-                        } else if rd.value() <= 7 && rn == rd && *imm >= 0 && *imm <= 255 {
+                        } else if (inst.set_flags || inst.condition.is_some())
+                            && rd.value() <= 7
+                            && rn == rd
+                            && *imm >= 0
+                            && *imm <= 255
+                        {
                             // Format 3: ADDS/SUBS Rd, #imm8 (Rd == Rn)
                             2
                         } else {
@@ -705,6 +711,18 @@ pub fn thumb_instruction_size(inst: &Instruction) -> u32 {
                 // Shifted register operand -> always wide
                 [_, _, Operand::Shifted(..)] => 4,
                 [_, Operand::Shifted(..)] => 4,
+                // MOV Rd, Rm (Format 5) doesn't set flags, always narrow
+                [Operand::Reg(_), Operand::Reg(_)] if matches!(inst.mnemonic, Mov) => 2,
+                // All remaining narrow forms (Formats 1-4) set flags implicitly.
+                // Non-flag-setting narrow forms (ADD hi-reg, ADD/SUB SP, MOV hi-reg)
+                // are already matched by earlier arms. In unified syntax, require
+                // set_flags (or IT block) for the rest, unless always sets flags.
+                _ if !inst.set_flags
+                    && inst.condition.is_none()
+                    && !matches!(inst.mnemonic, Cmp | Cmn | Tst) =>
+                {
+                    4
+                }
                 _ => 2,
             }
         }
@@ -775,15 +793,26 @@ pub fn thumb_instruction_size(inst: &Instruction) -> u32 {
         Ldrsb | Ldrsh => 4, // No narrow encoding for signed loads with immediate
         Lsl | Lsr | Asr | Ror => match inst.operands.as_slice() {
             [Operand::Reg(rd), Operand::Reg(rm), ..] if rd.value() > 7 || rm.value() > 7 => 4,
+            // Narrow shift encodings always set flags
+            _ if !inst.set_flags && inst.condition.is_none() => 4,
             _ => 2,
         },
         Mul => match inst.operands.as_slice() {
             [Operand::Reg(rd), Operand::Reg(_), Operand::Reg(rd2)]
-                if rd.value() <= 7 && rd2.value() <= 7 && rd == rd2 =>
+                if (inst.set_flags || inst.condition.is_some())
+                    && rd.value() <= 7
+                    && rd2.value() <= 7
+                    && rd == rd2 =>
             {
                 2
             }
-            [Operand::Reg(rd), Operand::Reg(rm)] if rd.value() <= 7 && rm.value() <= 7 => 2,
+            [Operand::Reg(rd), Operand::Reg(rm)]
+                if (inst.set_flags || inst.condition.is_some())
+                    && rd.value() <= 7
+                    && rm.value() <= 7 =>
+            {
+                2
+            }
             _ => 4,
         },
         Mla | Mls | Umull | Smull | Umlal | Smlal | Dmb | Dsb | Isb => 4,
@@ -797,6 +826,8 @@ pub fn thumb_instruction_size(inst: &Instruction) -> u32 {
         },
         Neg => match inst.operands.as_slice() {
             [Operand::Reg(rd), Operand::Reg(rm)] if rd.value() > 7 || rm.value() > 7 => 4,
+            // Narrow NEG always sets flags
+            _ if !inst.set_flags && inst.condition.is_none() => 4,
             _ => 2,
         },
         Adr => match inst.operands.as_slice() {
@@ -1260,8 +1291,13 @@ fn encode_add(
             Ok(emit16(hw.raw_value()))
         }
         // ADDS Rd, Rn, #imm8 (Format 3) when Rd == Rn -- preferred by GNU as
+        // Narrow encoding always sets flags; require set_flags (or IT block) for unified syntax.
         [Operand::Reg(rd), Operand::Reg(rn), Operand::Imm(imm)]
-            if rd.value() <= 7 && rd == rn && *imm >= 0 && *imm <= 255 =>
+            if (inst.set_flags || inst.condition.is_some())
+                && rd.value() <= 7
+                && rd == rn
+                && *imm >= 0
+                && *imm <= 255 =>
         {
             let hw = DataImm8::ZERO
                 .with_prefix(true)
@@ -1271,8 +1307,13 @@ fn encode_add(
             Ok(emit16(hw.raw_value()))
         }
         // ADDS Rd, Rn, #imm3 (Format 2)
+        // Narrow encoding always sets flags; require set_flags (or IT block) for unified syntax.
         [Operand::Reg(rd), Operand::Reg(rn), Operand::Imm(imm)]
-            if rd.value() <= 7 && rn.value() <= 7 && *imm >= 0 && *imm <= 7 =>
+            if (inst.set_flags || inst.condition.is_some())
+                && rd.value() <= 7
+                && rn.value() <= 7
+                && *imm >= 0
+                && *imm <= 7 =>
         {
             let hw = AddSubRegImm3::ZERO
                 .with_prefix(u2::new(0b11))
@@ -1284,8 +1325,12 @@ fn encode_add(
             Ok(emit16(hw.raw_value()))
         }
         // ADDS Rd, Rn, Rm (Format 2)
+        // Narrow encoding always sets flags; require set_flags (or IT block) for unified syntax.
         [Operand::Reg(rd), Operand::Reg(rn), Operand::Reg(rm)]
-            if rd.value() <= 7 && rn.value() <= 7 && rm.value() <= 7 =>
+            if (inst.set_flags || inst.condition.is_some())
+                && rd.value() <= 7
+                && rn.value() <= 7
+                && rm.value() <= 7 =>
         {
             let hw = AddSubRegImm3::ZERO
                 .with_prefix(u2::new(0b11))
@@ -1297,7 +1342,10 @@ fn encode_add(
             Ok(emit16(hw.raw_value()))
         }
         // ADDS Rd, #imm8 (Format 3)
-        [Operand::Reg(rd), Operand::Imm(imm)] if rd.value() <= 7 => {
+        // Narrow encoding always sets flags; require set_flags (or IT block) for unified syntax.
+        [Operand::Reg(rd), Operand::Imm(imm)]
+            if (inst.set_flags || inst.condition.is_some()) && rd.value() <= 7 =>
+        {
             let hw = DataImm8::ZERO
                 .with_prefix(true)
                 .with_op(u2::new(0b10))
@@ -1356,8 +1404,13 @@ fn encode_sub(inst: &Instruction, _offset: u32) -> Result<EncodedInst, AsmError>
             Ok(emit16(hw.raw_value()))
         }
         // SUBS Rd, Rn, #imm8 (Format 3) when Rd == Rn -- preferred by GNU as
+        // Narrow encoding always sets flags; require set_flags (or IT block) for unified syntax.
         [Operand::Reg(rd), Operand::Reg(rn), Operand::Imm(imm)]
-            if rd.value() <= 7 && rd == rn && *imm >= 0 && *imm <= 255 =>
+            if (inst.set_flags || inst.condition.is_some())
+                && rd.value() <= 7
+                && rd == rn
+                && *imm >= 0
+                && *imm <= 255 =>
         {
             let hw = DataImm8::ZERO
                 .with_prefix(true)
@@ -1367,8 +1420,13 @@ fn encode_sub(inst: &Instruction, _offset: u32) -> Result<EncodedInst, AsmError>
             Ok(emit16(hw.raw_value()))
         }
         // SUBS Rd, Rn, #imm3
+        // Narrow encoding always sets flags; require set_flags (or IT block) for unified syntax.
         [Operand::Reg(rd), Operand::Reg(rn), Operand::Imm(imm)]
-            if rd.value() <= 7 && rn.value() <= 7 && *imm >= 0 && *imm <= 7 =>
+            if (inst.set_flags || inst.condition.is_some())
+                && rd.value() <= 7
+                && rn.value() <= 7
+                && *imm >= 0
+                && *imm <= 7 =>
         {
             let hw = AddSubRegImm3::ZERO
                 .with_prefix(u2::new(0b11))
@@ -1380,8 +1438,12 @@ fn encode_sub(inst: &Instruction, _offset: u32) -> Result<EncodedInst, AsmError>
             Ok(emit16(hw.raw_value()))
         }
         // SUBS Rd, Rn, Rm
+        // Narrow encoding always sets flags; require set_flags (or IT block) for unified syntax.
         [Operand::Reg(rd), Operand::Reg(rn), Operand::Reg(rm)]
-            if rd.value() <= 7 && rn.value() <= 7 && rm.value() <= 7 =>
+            if (inst.set_flags || inst.condition.is_some())
+                && rd.value() <= 7
+                && rn.value() <= 7
+                && rm.value() <= 7 =>
         {
             let hw = AddSubRegImm3::ZERO
                 .with_prefix(u2::new(0b11))
@@ -1393,7 +1455,10 @@ fn encode_sub(inst: &Instruction, _offset: u32) -> Result<EncodedInst, AsmError>
             Ok(emit16(hw.raw_value()))
         }
         // SUBS Rd, #imm8
-        [Operand::Reg(rd), Operand::Imm(imm)] if rd.value() <= 7 => {
+        // Narrow encoding always sets flags; require set_flags (or IT block) for unified syntax.
+        [Operand::Reg(rd), Operand::Imm(imm)]
+            if (inst.set_flags || inst.condition.is_some()) && rd.value() <= 7 =>
+        {
             let hw = DataImm8::ZERO
                 .with_prefix(true)
                 .with_op(u2::new(0b11))
@@ -1447,6 +1512,12 @@ fn encode_cmp(inst: &Instruction) -> Result<EncodedInst, AsmError> {
 
 fn encode_alu(inst: &Instruction) -> Result<EncodedInst, AsmError> {
     let line = inst.line;
+    // Narrow ALU encodings always set flags. In unified syntax, require set_flags
+    // (or IT block condition) unless the instruction inherently sets flags (TST, CMN).
+    let always_sets_flags = matches!(inst.mnemonic, Mnemonic::Tst | Mnemonic::Cmn);
+    if !always_sets_flags && !inst.set_flags && inst.condition.is_none() {
+        return Err(AsmError::new(line, "narrow ALU requires S flag in unified syntax"));
+    }
     let (rd, rm) = match inst.operands.as_slice() {
         [Operand::Reg(rd), Operand::Reg(rm)] => (*rd, *rm),
         // 3-operand form where Rd == Rn: collapse to 2-reg (AND Rd, Rd, Rm -> ANDS Rd, Rm)
@@ -1491,8 +1562,11 @@ fn encode_shift(inst: &Instruction) -> Result<EncodedInst, AsmError> {
         Mnemonic::Asr => 0b10,
         Mnemonic::Ror => {
             // ROR is only register-register in Thumb (Format 4)
+            // Narrow encoding always sets flags; require set_flags for unified syntax.
             return match inst.operands.as_slice() {
-                [Operand::Reg(rd), Operand::Reg(rm)] => {
+                [Operand::Reg(rd), Operand::Reg(rm)]
+                    if inst.set_flags || inst.condition.is_some() =>
+                {
                     let hw = AluOp::ZERO
                         .with_prefix(true)
                         .with_op(u4::new(0b0111))
@@ -1511,7 +1585,10 @@ fn encode_shift(inst: &Instruction) -> Result<EncodedInst, AsmError> {
 
     match inst.operands.as_slice() {
         // LSL/LSR/ASR Rd, Rm, #imm5 (Format 1)
-        [Operand::Reg(rd), Operand::Reg(rm), Operand::Imm(imm)] => {
+        // Narrow encoding always sets flags; require set_flags (or IT block) for unified syntax.
+        [Operand::Reg(rd), Operand::Reg(rm), Operand::Imm(imm)]
+            if inst.set_flags || inst.condition.is_some() =>
+        {
             // ARM encodes LSR #32 and ASR #32 as imm5=0
             let imm5 = (*imm as u8) & 0x1F;
             let hw = ShiftImm::ZERO
@@ -1522,7 +1599,8 @@ fn encode_shift(inst: &Instruction) -> Result<EncodedInst, AsmError> {
             Ok(emit16(hw.raw_value()))
         }
         // LSL/LSR/ASR Rd, Rm (Format 4, register shift)
-        [Operand::Reg(rd), Operand::Reg(rm)] => {
+        // Narrow encoding always sets flags; require set_flags (or IT block) for unified syntax.
+        [Operand::Reg(rd), Operand::Reg(rm)] if inst.set_flags || inst.condition.is_some() => {
             let alu_op = match inst.mnemonic {
                 Mnemonic::Lsl => 0b0010,
                 Mnemonic::Lsr => 0b0011,
