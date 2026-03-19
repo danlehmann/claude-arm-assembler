@@ -510,6 +510,92 @@ impl Sat16 {
     }
 }
 
+/// BFI / BFC / UBFX / SBFX bit field operations
+/// cond 0111 1x0 msb Rd lsb 001 Rn  (BFI/BFC)
+/// cond 0111 1x1 widthm1 Rd lsb 101 Rn  (UBFX/SBFX)
+#[bitfield(u32)]
+struct BitField {
+    #[bits(0..=3, rw)]
+    rn: u4,
+    #[bits(4..=6, rw)]
+    op2: u3,
+    #[bits(7..=11, rw)]
+    lsb: u5,
+    #[bits(12..=15, rw)]
+    rd: u4,
+    #[bits(16..=20, rw)]
+    msb_or_width: u5,
+    #[bits(21..=27, rw)]
+    op1: u7,
+    #[bits(28..=31, rw)]
+    cond: Condition,
+}
+
+/// SSAT / USAT
+/// cond 0110 1x1 sat_imm Rd shift_imm sh 01 Rn
+#[bitfield(u32)]
+struct SatShift {
+    #[bits(0..=3, rw)]
+    rn: u4,
+    // bits 4-5: 01
+    #[bit(4, rw)]
+    fixed4: bool,
+    #[bit(5, rw)]
+    fixed5: bool,
+    #[bit(6, rw)]
+    sh: bool,
+    #[bits(7..=11, rw)]
+    shift_imm: u5,
+    #[bits(12..=15, rw)]
+    rd: u4,
+    #[bits(16..=20, rw)]
+    sat_imm: u5,
+    #[bits(21..=27, rw)]
+    op: u7,
+    #[bits(28..=31, rw)]
+    cond: Condition,
+}
+
+impl SatShift {
+    fn ssat() -> Self {
+        Self::ZERO.with_fixed4(true).with_op(u7::new(0x35)) // 0110 101 -> bits 27:21
+    }
+    fn usat() -> Self {
+        Self::ZERO.with_fixed4(true).with_op(u7::new(0x37)) // 0110 111 -> bits 27:21
+    }
+}
+
+/// PKHBT / PKHTB
+/// cond 0110 1000 Rn Rd shift_imm tb 01 Rm
+#[bitfield(u32)]
+struct Pkh {
+    #[bits(0..=3, rw)]
+    rm: u4,
+    // bits 4-5: 01
+    #[bit(4, rw)]
+    fixed4: bool,
+    #[bit(5, rw)]
+    fixed5: bool,
+    #[bit(6, rw)]
+    tb: bool,
+    #[bits(7..=11, rw)]
+    shift_imm: u5,
+    #[bits(12..=15, rw)]
+    rd: u4,
+    #[bits(16..=19, rw)]
+    rn: u4,
+    #[bits(20..=27, rw)]
+    op: u8,
+    #[bits(28..=31, rw)]
+    cond: Condition,
+}
+
+impl Pkh {
+    fn new() -> Self {
+        Self::ZERO.with_fixed4(true).with_op(0x68) // 0110 1000
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Encoding entry point
 // ---------------------------------------------------------------------------
@@ -970,7 +1056,7 @@ fn encode_ldr_a32(
                 .with_load(true)
                 .with_rn(*base)
                 .with_rt(*rt)
-                .with_shift_imm(u5::new(*amt))
+                .with_shift_imm(u5::masked_new(*amt))
                 .with_shift_type(u2::new(st.encoding() as u8))
                 .with_rm(*rm);
             Ok(emit32(enc.raw_value()))
@@ -1069,7 +1155,7 @@ fn encode_str_a32(inst: &Instruction) -> Result<EncodedInst, AsmError> {
                 .with_load(false)
                 .with_rn(*base)
                 .with_rt(*rt)
-                .with_shift_imm(u5::new(*amt))
+                .with_shift_imm(u5::masked_new(*amt))
                 .with_shift_type(u2::new(st.encoding() as u8))
                 .with_rm(*rm);
             Ok(emit32(enc.raw_value()))
@@ -1792,16 +1878,16 @@ fn encode_bfi_a32(inst: &Instruction) -> Result<EncodedInst, AsmError> {
     let line = inst.line;
     match inst.operands.as_slice() {
         [Operand::Reg(rd), Operand::Reg(rn), Operand::Imm(lsb), Operand::Imm(width)] => {
-            let c = cond_bits(inst);
-            let msb = *lsb as u32 + *width as u32 - 1;
-            // cond 0111 110 msb Rd lsb 001 Rn
-            let enc: u32 = (c << 28)
-                | 0x07C0_0010
-                | (msb << 16)
-                | ((rd.value() as u32) << 12)
-                | ((*lsb as u32) << 7)
-                | (rn.value() as u32);
-            Ok(emit32(enc))
+            let msb = *lsb as u8 + *width as u8 - 1;
+            let enc = BitField::ZERO
+                .with_cond(inst.condition.unwrap_or(Condition::Al))
+                .with_op1(u7::new(0b0111_110))
+                .with_msb_or_width(u5::new(msb))
+                .with_rd(*rd)
+                .with_lsb(u5::new(*lsb as u8))
+                .with_op2(u3::new(0b001))
+                .with_rn(*rn);
+            Ok(emit32(enc.raw_value()))
         }
         _ => Err(AsmError::new(line, "BFI: need Rd, Rn, #lsb, #width")),
     }
@@ -1811,15 +1897,16 @@ fn encode_bfc_a32(inst: &Instruction) -> Result<EncodedInst, AsmError> {
     let line = inst.line;
     match inst.operands.as_slice() {
         [Operand::Reg(rd), Operand::Imm(lsb), Operand::Imm(width)] => {
-            let c = cond_bits(inst);
-            let msb = *lsb as u32 + *width as u32 - 1;
-            // cond 0111 110 msb Rd lsb 001 1111
-            let enc: u32 = (c << 28)
-                | 0x07C0_001F
-                | (msb << 16)
-                | ((rd.value() as u32) << 12)
-                | ((*lsb as u32) << 7);
-            Ok(emit32(enc))
+            let msb = *lsb as u8 + *width as u8 - 1;
+            let enc = BitField::ZERO
+                .with_cond(inst.condition.unwrap_or(Condition::Al))
+                .with_op1(u7::new(0b0111_110))
+                .with_msb_or_width(u5::new(msb))
+                .with_rd(*rd)
+                .with_lsb(u5::new(*lsb as u8))
+                .with_op2(u3::new(0b001))
+                .with_rn(u4::new(0xF));
+            Ok(emit32(enc.raw_value()))
         }
         _ => Err(AsmError::new(line, "BFC: need Rd, #lsb, #width")),
     }
@@ -1829,21 +1916,21 @@ fn encode_bfx_a32(inst: &Instruction) -> Result<EncodedInst, AsmError> {
     let line = inst.line;
     match inst.operands.as_slice() {
         [Operand::Reg(rd), Operand::Reg(rn), Operand::Imm(lsb), Operand::Imm(width)] => {
-            let c = cond_bits(inst);
-            let widthm1 = *width as u32 - 1;
-            let op = if inst.mnemonic == Mnemonic::Sbfx {
-                0x07A0_0050u32
+            let widthm1 = *width as u8 - 1;
+            let op1 = if inst.mnemonic == Mnemonic::Sbfx {
+                0b0111_101u8
             } else {
-                0x07E0_0050
+                0b0111_111
             };
-            // cond 0111 1x1 widthm1 Rd lsb 101 Rn
-            let enc: u32 = (c << 28)
-                | op
-                | (widthm1 << 16)
-                | ((rd.value() as u32) << 12)
-                | ((*lsb as u32) << 7)
-                | (rn.value() as u32);
-            Ok(emit32(enc))
+            let enc = BitField::ZERO
+                .with_cond(inst.condition.unwrap_or(Condition::Al))
+                .with_op1(u7::new(op1))
+                .with_msb_or_width(u5::new(widthm1))
+                .with_rd(*rd)
+                .with_lsb(u5::new(*lsb as u8))
+                .with_op2(u3::new(0b101))
+                .with_rn(*rn);
+            Ok(emit32(enc.raw_value()))
         }
         _ => Err(AsmError::new(line, "UBFX/SBFX: need Rd, Rn, #lsb, #width")),
     }
@@ -2095,35 +2182,27 @@ fn encode_msr_a32(inst: &Instruction) -> Result<EncodedInst, AsmError> {
 // ---------------------------------------------------------------------------
 
 fn encode_ssat_a32(inst: &Instruction) -> Result<EncodedInst, AsmError> {
-    let line = inst.line;
     let (rd, sat, rn, sh, sh_amt) = parse_sat_ops_a32(inst)?;
-    let _ = line;
-    let c = cond_bits(inst);
-    // cond 0110 101 sat_imm Rd shift_imm shift 01 Rn
-    let enc: u32 = (c << 28)
-        | 0x06A0_0010
-        | (((sat - 1) as u32) << 16)
-        | ((rd.value() as u32) << 12)
-        | ((sh_amt as u32) << 7)
-        | ((sh as u32) << 6)
-        | (rn.value() as u32);
-    Ok(emit32(enc))
+    let enc = SatShift::ssat()
+        .with_cond(inst.condition.unwrap_or(Condition::Al))
+        .with_sat_imm(u5::new(sat - 1))
+        .with_rd(rd)
+        .with_shift_imm(u5::masked_new(sh_amt))
+        .with_sh(sh != 0)
+        .with_rn(rn);
+    Ok(emit32(enc.raw_value()))
 }
 
 fn encode_usat_a32(inst: &Instruction) -> Result<EncodedInst, AsmError> {
-    let line = inst.line;
     let (rd, sat, rn, sh, sh_amt) = parse_sat_ops_a32(inst)?;
-    let _ = line;
-    let c = cond_bits(inst);
-    // cond 0110 111 sat_imm Rd shift_imm shift 01 Rn
-    let enc: u32 = (c << 28)
-        | 0x06E0_0010
-        | ((sat as u32) << 16)
-        | ((rd.value() as u32) << 12)
-        | ((sh_amt as u32) << 7)
-        | ((sh as u32) << 6)
-        | (rn.value() as u32);
-    Ok(emit32(enc))
+    let enc = SatShift::usat()
+        .with_cond(inst.condition.unwrap_or(Condition::Al))
+        .with_sat_imm(u5::new(sat))
+        .with_rd(rd)
+        .with_shift_imm(u5::masked_new(sh_amt))
+        .with_sh(sh != 0)
+        .with_rn(rn);
+    Ok(emit32(enc.raw_value()))
 }
 
 fn parse_sat_ops_a32(inst: &Instruction) -> Result<(u4, u8, u4, u8, u8), AsmError> {
@@ -2190,21 +2269,14 @@ fn encode_pkh_a32(inst: &Instruction) -> Result<EncodedInst, AsmError> {
         }
         _ => return Err(AsmError::new(line, "PKHBT/PKHTB: need Rd, Rn, Rm")),
     };
-    let c = cond_bits(inst);
-    let tb = if inst.mnemonic == Mnemonic::Pkhtb {
-        1u32
-    } else {
-        0
-    };
-    // cond 0110 1000 Rn Rd shift_imm tb 01 Rm
-    let enc: u32 = (c << 28)
-        | 0x0680_0010
-        | ((rn.value() as u32) << 16)
-        | ((rd.value() as u32) << 12)
-        | (((sh_amt as u32) & 0x1F) << 7)
-        | (tb << 6)
-        | (rm.value() as u32);
-    Ok(emit32(enc))
+    let enc = Pkh::new()
+        .with_cond(inst.condition.unwrap_or(Condition::Al))
+        .with_rn(rn)
+        .with_rd(rd)
+        .with_shift_imm(u5::masked_new(sh_amt))
+        .with_tb(inst.mnemonic == Mnemonic::Pkhtb)
+        .with_rm(rm);
+    Ok(emit32(enc.raw_value()))
 }
 
 // ---------------------------------------------------------------------------
@@ -2687,20 +2759,19 @@ fn encode_ldr_unpriv_a32(
             pre_index: false,
             ..
         }] => {
-            let c = cond_bits(inst);
-            let u = (!*sub) as u32;
-            let enc: u32 = (c << 28)
-                | (0x06 << 24)
-                | (u << 23)
-                | ((byte as u32) << 22)
-                | (1 << 21)
-                | ((load as u32) << 20)
-                | ((base.value() as u32) << 16)
-                | ((rt.value() as u32) << 12)
-                | ((*amt as u32) << 7)
-                | ((st.encoding() as u32) << 5)
-                | (rm.value() as u32);
-            Ok(emit32(enc))
+            // P=0, W=1 for unprivileged; I=1 (bit25) via class=011
+            let enc = LdrStrReg::new()
+                .with_cond(inst.condition.unwrap_or(Condition::Al))
+                .with_add(!*sub)
+                .with_byte(byte)
+                .with_writeback(true)
+                .with_load(load)
+                .with_rn(*base)
+                .with_rt(*rt)
+                .with_shift_imm(u5::masked_new(*amt))
+                .with_shift_type(u2::new(st.encoding() as u8))
+                .with_rm(*rm);
+            Ok(emit32(enc.raw_value()))
         }
         _ => Err(AsmError::new(
             line,
